@@ -10,7 +10,15 @@ description: 把资讯文章链接变成 X (Twitter) 帖子并通过 Buffer 发�
 
 ## 第 0 步：配置从哪来
 
-非敏感配置（署名 handle、图床路径、输出目录等）在 `x-post-scheduler.config.json`（工作目录）或 `~/.config/x-post-scheduler/config.json`，字段说明见仓库 README。脚本会自动读取，还会自动发现 Buffer 频道和 Typefully social set（各只有一个时）。API key 走环境变量或 `~/.config/{buffer,typefully}/key` 文件——**如果用户把 key 直接粘贴在聊天里，提醒其立即轮换**（进入对话上下文即视为泄露）。
+非敏感配置（署名 handle、图床路径、输出目录等）在 `x-post-scheduler.config.json`（工作目录）或 `~/.config/x-post-scheduler/config.json`，字段说明见仓库 README。脚本会自动读取，还会自动发现 Buffer 频道和 Typefully social set（各只有一个时）。API key 走环境变量或 `~/.config/{buffer,typefully}/key` 文件。
+
+**发现缺 key 或缺配置时**：请用户在**自己的终端**运行配置向导——
+
+```bash
+node .claude/skills/x-post-scheduler/scripts/setup.mjs
+```
+
+向导交互式引导全部配置，key 输入不回显、当场验证、不经过对话。**绝不要让用户把 key 粘贴到聊天里**；如果用户已经贴了，提醒其立即轮换（进入对话上下文即视为泄露）。
 
 以下命令假设 skill 安装在项目 `.claude/skills/` 下；用户级安装（`~/.claude/skills/`）时自行替换前缀。
 

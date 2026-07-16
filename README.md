@@ -48,17 +48,22 @@
 
 发 Article 需要 X 账号有 Premium；长推不限字数需要 Premium+（免费账号 skill 会按 280 计数字符控制篇幅）。
 
-## 安装
+## 安装（两条命令）
 
 ```bash
-git clone https://github.com/cxjwin/x-post-scheduler.git
-# 项目级安装（推荐，只在某个工作目录生效）
-cp -r x-post-scheduler/skills/* your-project/.claude/skills/
-# 或用户级安装（全局生效）
-cp -r x-post-scheduler/skills/* ~/.claude/skills/
+git clone https://github.com/cxjwin/x-post-scheduler.git && cd x-post-scheduler
+node skills/x-post-scheduler/scripts/setup.mjs
 ```
 
-## 配置
+第二条是**交互式配置向导**（约 2 分钟，零依赖），跟着提示走完就能用。它会：
+
+- 把 skill 装进 `~/.claude/skills/`（或你指定的项目）
+- 引导输入 Buffer / Typefully API key——**输入不回显，当场验证连通性**，写入 `~/.config/{buffer,typefully}/key`（权限 600）
+- 自动发现你的 X 频道和 Typefully social set（多个才让你选）
+- 图床仓库：已登录 `gh` 的话**一键创建 + 克隆**，没有就填已有克隆路径或先跳过
+- 每一步都可跳过，重跑不会弄丢已配好的项——随时补配
+
+## 手动配置（不想用向导，或想了解细节）
 
 ### 1. API key（敏感，走文件或环境变量，**永远不要粘贴进和 agent 的聊天里**）
 
