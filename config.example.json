@@ -1,0 +1,8 @@
+{
+  "handle": "@your_handle",
+  "buffer_channel_id": "",
+  "typefully_social_set": "",
+  "assets_dir": "/absolute/path/to/your/post-assets-clone",
+  "assets_raw_base": "",
+  "output_dir": ""
+}

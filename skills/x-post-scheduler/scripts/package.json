@@ -1,0 +1,8 @@
+{
+  "name": "x-post-scheduler-scripts",
+  "private": true,
+  "description": "Scripts for the x-post-scheduler Claude Code skill. buffer-post.mjs / typefully-post.mjs are zero-dependency; puppeteer is only needed for the HTML poster fallback (render.js) and code/table image rendering (md-assets.mjs).",
+  "dependencies": {
+    "puppeteer": "^24.43.1"
+  }
+}

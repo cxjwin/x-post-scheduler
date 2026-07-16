@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<style>
+  :root {
+    /* 配色都在这里改 */
+    --bg: #0d1117;          /* 页面背景（GitHub Dark） */
+    --card-bg: #161b22;     /* 卡片背景 */
+    --border: #30363d;      /* 细边框 */
+    --text: #e6edf3;        /* 正文 */
+    --muted: #8b949e;       /* 次要信息 */
+    --accent: #58a6ff;      /* 品牌主色 */
+    --accent-2: #3fb950;    /* 点缀色（终端绿） */
+    --font-sans: -apple-system, "PingFang SC", "Noto Sans CJK SC", "Noto Sans SC", "Microsoft YaHei", "Helvetica Neue", sans-serif;
+    --font-mono: "SF Mono", "JetBrains Mono", Menlo, Consolas, "Courier New", monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 1200px; height: 675px; overflow: hidden; }
+  body { background: var(--bg); font-family: var(--font-sans); color: var(--text); }
+  .card {
+    width: 1128px; height: 603px; margin: 36px;
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 48px 56px 40px;
+    display: flex; flex-direction: column;
+  }
+  .meta {
+    display: flex; justify-content: space-between;
+    font-family: var(--font-mono); font-size: 20px; color: var(--muted);
+  }
+  .meta .source::before { content: "// "; color: var(--accent-2); }
+  .title {
+    margin-top: 34px;
+    font-size: 58px; font-weight: 700; line-height: 1.32;
+    letter-spacing: 0.01em;
+    overflow: hidden;
+  }
+  .points { margin-top: auto; display: flex; flex-direction: column; gap: 18px; }
+  .point { font-size: 27px; line-height: 1.45; display: flex; }
+  .point .marker { font-family: var(--font-mono); color: var(--accent); margin-right: 16px; flex: none; }
+  .footer {
+    margin-top: 36px; padding-top: 26px;
+    border-top: 1px solid var(--border);
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .handle { font-family: var(--font-mono); font-size: 24px; color: var(--muted); }
+  .brand {
+    width: 46px; height: 20px; border-radius: 5px;
+    background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="meta">
+      <span class="source">{{source}}</span>
+      <span class="date">{{date}}</span>
+    </div>
+    <div class="title" id="title">{{title}}</div>
+    <div class="points">
+      <div class="point"><span class="marker">&#9656;</span><span>{{point1}}</span></div>
+      <div class="point"><span class="marker">&#9656;</span><span>{{point2}}</span></div>
+      <div class="point"><span class="marker">&#9656;</span><span>{{point3}}</span></div>
+    </div>
+    <div class="footer">
+      <span class="handle">{{handle}}</span>
+      <div class="brand"></div>
+    </div>
+  </div>
+  <script>
+    // 标题过长时自动缩小字号：从 58px 逐步降到最小 32px，最多占约 3 行
+    (function () {
+      var el = document.getElementById('title');
+      var size = 58;
+      var maxHeight = 245;
+      while (el.scrollHeight > maxHeight && size > 32) {
+        size -= 2;
+        el.style.fontSize = size + 'px';
+      }
+      el.style.maxHeight = maxHeight + 'px';
+    })();
+  </script>
+</body>
+</html>
