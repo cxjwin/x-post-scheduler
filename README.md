@@ -40,9 +40,9 @@
 | [Claude Code](https://claude.com/claude-code) | 运行 skill 的 agent | ✅ |
 | Node.js ≥ 18 | 全部脚本（零 npm 依赖，`fetch` 内置） | ✅ |
 | [Buffer](https://buffer.com) 账号 + API key | 短推发布/排期（免费版够用：3 频道 / 10 条排期） | ✅（短推） |
-| GitHub 公开仓库 ×1 | 图床（Buffer 只收公开 URL，不能传本地文件） | 需要配图时 |
+| GitHub 公开仓库 ×1 | 短推配图图床（Buffer 只收公开 URL，不能传本地文件；**长文 Article 正文图走 Typefully 媒体，不用图床**） | 短推配图时 |
 | [Codex CLI](https://github.com/openai/codex) | AI 海报（`gpt-image-2` 生底图 + Pillow 叠字，中文 100% 准确） | 可选 |
-| Puppeteer | HTML 模板海报兜底、代码块/表格转图 | 可选（`cd skills/x-post-scheduler/scripts && npm install`） |
+| Puppeteer | HTML 模板海报兜底、代码块/表格转图 | **发带代码/表格的长文必需**（`cd skills/x-post-scheduler/scripts && npm install`）；纯短推可省 |
 | [Typefully](https://typefully.com) 账号 + API key | 长文 X Article 排期（X 原生不支持 Article 排期） | 可选（长文） |
 | [freeze](https://github.com/charmbracelet/freeze) | 代码块语法高亮图（`brew install charmbracelet/tap/freeze`） | 可选（缺了走 Puppeteer 兜底） |
 
@@ -128,10 +128,12 @@ https://example.com/some-article 明早 8 点发  ← 指定时间则排期
 
 - **GitHub raw 返回 429 不用等**——那是对你本机 curl 的限流，Buffer 服务器从自己的 IP 取图不受影响，push 成功就直接发。
 - **海报要点符号用「•」别用「▸」**——中文字体缺 ▸ 字形，会渲染成豆腐块。
-- **X Article 的 Markdown 子集很小**——代码块会降级成引用、表格不渲染、行内反引号原样显示。`md-assets.mjs` 会自动分流：多行代码→语法高亮图、小表格→列表、大表格→深色表格图、行内码→「」、H3+→加粗行。
+- **X Article 的 Markdown 子集很小，正文图还必须走 Typefully 媒体**——代码块降级成引用、表格不渲染、行内反引号原样显示，而且**外链 markdown 图 `![](url)` 不会内嵌、只显示成链接文本**（实测踩过）。`md-assets.mjs` + `typefully-post.mjs` 自动分流：多行代码/大表格→图片并**上传 Typefully、用 `<typ:media>` 标签嵌入**（不走 github 图床）、小表格→列表、行内码→「」、H3+→加粗行。
 - **Typefully 的 Article 标题取自正文首个 H1**，`title` 字段不存在（传了报 422）；frontmatter 会被自动剥掉。
 - **`dueAt` 必须是未来时间**——确认拖过了预定时间就近立即发，agent 会在报告里说明。
 - **freeze 的 stdin 必须接 `/dev/null`**——给 pipe 它会忽略文件参数报 "No input"（脚本内已处理）。
+- **Typefully `media/upload` 的 `file_name` 必须是 ASCII**——中文文件名会 422（校验 `^[a-zA-Z0-9_.()\-]+\.ext$`），脚本已用 `code-1.png` 这类 ASCII 名上传，与本地中文 slug 解耦。
+- **`--publish-at now` 别直传给 Typefully**——它不认 "now" 字符串（会被静默当草稿存下、不发布），脚本已改成转近未来 ISO；且发布后要回读 `GET drafts/{id}` 确认真实状态（创建响应的 `status` 是瞬时值，可能显示 draft 但其实已 published）。
 
 ## 目录结构
 

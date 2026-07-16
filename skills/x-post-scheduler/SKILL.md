@@ -202,32 +202,35 @@ node .claude/skills/x-post-scheduler/scripts/typefully-post.mjs --check
 node .claude/skills/x-post-scheduler/scripts/typefully-post.mjs \
   --markdown-file 文章.md \
   [--cover 封面.png] \
-  [--publish-at "2026-07-16T08:00:00+08:00"]   # 不带此参数=仅存草稿
+  [--publish-at "2026-07-16T08:00:00+08:00" | --publish-at now]   # 不带此参数=仅存草稿；now=立即发布
 ```
 
 规则：
 
-- **Article 发布保留人工确认**（这是作品级内容，不适用短推的自动发布授权）：默认先创建**草稿**，把预览链接（`private_url`）给用户，用户在 Typefully 里核对排版后，再按用户给的时间补 `publish_at` 排期（可用 Typefully UI 或重建草稿）
+- **Article 发布保留人工确认**（这是作品级内容，不适用短推的自动发布授权）：默认先创建**草稿**，把预览链接（`private_url`）给用户，用户在 Typefully 里核对排版后，再按用户给的时间排期或立即发布
+- 发布方式：`--publish-at` 传明确 ISO 时间则排期，传 `now` 则立即发布（脚本会把 `now` 转成近未来 ISO——**Typefully 不接受 "now" 字符串，直传会被静默当草稿存下、不发布**）；不带 `--publish-at` 仅存草稿
+- **发布后必须回读真实状态**：创建响应里的 `status` 是瞬时值（`publish_at` 生效后其实可能已 published，响应仍显示 draft），脚本已内置轮询 `GET drafts/{id}` 确认最终状态并打印 `x_article_published_url`，别只信创建响应
 - token 从环境变量 `TYPEFULLY_KEY` 或 `~/.config/typefully/key` 读取；social set 未配置时自动发现（恰好一个时）
-- 已验证的 API 事实：`x_article.content_markdown` 为正文字段，**文章标题取自正文首个 H1**（`x_article` 下没有 `title` 字段，传了报 422 extra_forbidden）；封面走 `--cover`（media/upload 预签名直传，上传后需数秒处理，脚本已内置等待）；frontmatter 会被脚本自动剥掉
+- 已验证的 API 事实：`x_article.content_markdown` 为正文字段，**文章标题取自正文首个 H1**（`x_article` 下没有 `title` 字段，传了报 422 extra_forbidden）；封面走 `--cover`（顶层 `cover_media_id`）；frontmatter 会被脚本自动剥掉。改错草稿用 `DELETE /v2/social-sets/{ss}/drafts/{id}`（实测返回 204；已发布的 Article 删 Typefully 记录**不撤回** X 上的原生文章，需在 X 手动删）
 - 发布 Article 需要账号有 X Premium
 
 ### X 化排版预处理（typefully-post.mjs 自动执行）
 
-X Article 的 markdown 子集只支持标题(H1/H2)/粗体/引用/列表/链接/图片——fenced code 会降级成引用、表格不渲染、行内反引号原样显示。`typefully-post.mjs` 发长文前自动调用 `md-assets.mjs` 按元素分流（`--no-transform` 可关闭）：
+X Article 的 markdown 子集只支持标题(H1/H2)/粗体/引用/列表/链接——fenced code 会降级成引用、表格不渲染、行内反引号原样显示，而且**正文图必须是 Typefully 上传的媒体、用 `<typ:media media_id="..." />` 标签嵌入，外链 markdown 图 `![](url)` 不会渲染、只显示成链接文本**（实测踩过大坑）。`typefully-post.mjs` 发长文前自动调用 `md-assets.mjs` 按元素分流（`--no-transform` 可关闭）：
 
 | 元素 | 处理 |
 |------|------|
-| 多行代码块 | 语法高亮 PNG 挂图床原位替入：freeze（github-dark 主题 + 窗口装饰）；**代码含中文或 freeze 不可用时自动退回 puppeteer 深色模板**（freeze 对 CJK 缺字体防豆腐块） |
+| 多行代码块 | 渲染成语法高亮 PNG（freeze github-dark；**代码含中文或 freeze 不可用时退回 puppeteer 深色模板**，freeze 对 CJK 缺字体防豆腐块），上传 Typefully 后以 `<typ:media>` 原位嵌入 |
 | 单行代码块 | 转正文文本行（shell 类语言加「$ 」前缀），不出图 |
 | 表格 ≤2 列且 ≤8 行 | 改写成「- **键**：值」列表（手机端列表比表格图好读，这是升级不是妥协） |
-| 更大的表格 | 深色 GitHub 风 PNG（#0d1117 底，与海报视觉统一） |
+| 更大的表格 | 深色 GitHub 风 PNG（#0d1117 底，与海报视觉统一），同样走 `<typ:media>` 嵌入 |
 | 行内代码 | `xxx` → 「xxx」（X 无等宽格式，反引号只会原样显示） |
 | H3~H6 标题 | 降级成 **加粗行**（X Article 标题层级有限） |
 
-- 依赖 freeze：`brew install charmbracelet/tap/freeze`；未安装不阻塞，所有代码块走 puppeteer 兜底
-- 图片走配置的图床仓库（与海报同一 push 流程），**排期未发出前图床上的图不可删**
-- 独立自测（默认不 push、图片落在 `<output_dir>/md-assets-test/`，加 `--push` 才推图床）：
+- **正文图走 Typefully 媒体，不走 github 图床**：`typefully-post.mjs` 把图生成到本地临时目录，逐张 `media/upload`（POST 拿预签名 URL → 裸 PUT 字节 → 轮询 `ready`）拿 `media_id` 再替换成 `<typ:media>`。所以发 Article **不需要 `assets_dir` 图床**（那是短推 Buffer 用的），也不用担心图床图被删导致文章裂图
+- **上传的 `file_name` 必须是 ASCII**：Typefully 校验 `^[a-zA-Z0-9_.()\-]+\.(png|jpg|...)$`，中文名会 422；脚本用 `code-1.png`/`table-1.png` 这类 ASCII 名，与本地中文 slug 解耦
+- 依赖 freeze：`brew install charmbracelet/tap/freeze`；未安装不阻塞，所有代码块走 **puppeteer** 兜底——所以**发带代码块/表格的长文，puppeteer 是必需依赖**（`cd scripts && npm install`），缺了预处理会直接失败
+- 独立自测（`md-assets.mjs --test` 默认不 push、图片落在 `<output_dir>/md-assets-test/`，仅用于肉眼检查转换结果）：
 
 ```bash
 node .claude/skills/x-post-scheduler/scripts/md-assets.mjs --test 文章.md
