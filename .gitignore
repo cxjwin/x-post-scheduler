@@ -3,3 +3,4 @@ output/
 package-lock.json
 .DS_Store
 x-post-scheduler.config.json
+.workbuddy/

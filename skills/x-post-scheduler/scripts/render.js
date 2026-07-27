@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * x-post-scheduler 海报渲染脚本（HTML 模板兜底通道，需 puppeteer）
+ * x-post-scheduler 海报渲染脚本（HTML 模板兜底通道，需 puppeteer-core + 系统浏览器）
  *
  * 用法：
  *   node render.js --data '{"title":"...","point1":"...","point2":"...","point3":"...","source":"example.com","date":"2026-07-04","handle":"@your_handle"}' [--out xxx.png]
@@ -31,15 +31,6 @@ function loadFileConfig() {
 }
 const fileConfig = loadFileConfig();
 const OUTPUT_DIR = process.env.XPS_OUTPUT_DIR || fileConfig.output_dir || path.join(process.cwd(), 'output');
-
-let puppeteer;
-try {
-  puppeteer = require('puppeteer');
-} catch (e) {
-  console.error('[x-post-scheduler] 未找到 puppeteer，请先安装：');
-  console.error('  cd ' + __dirname + ' && npm install');
-  process.exit(1);
-}
 
 function parseArgs(argv) {
   const args = {};
@@ -96,7 +87,8 @@ function slugify(title) {
     ? (path.isAbsolute(args.out) ? args.out : path.join(OUTPUT_DIR, args.out))
     : path.join(OUTPUT_DIR, today + '-' + slugify(data.title) + '.png');
 
-  const browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox'] });
+  const { launchBrowser } = await import('./browser.mjs');
+  const browser = await launchBrowser();
   try {
     const page = await browser.newPage();
     await page.setViewport({ width: WIDTH, height: HEIGHT, deviceScaleFactor: 1 });

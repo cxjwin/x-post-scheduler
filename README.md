@@ -25,7 +25,7 @@
          ─→ Buffer 发布/排期（原文链接放首条评论）
          ─→ 发布后报告（推文链接 / 排期时间，回「删掉」即撤）
 
-长文 Markdown ─→ X 化排版（代码块→高亮图，表格→列表/图，行内码→「」）
+长文 Markdown ─→ X 化排版（代码块→高亮图 + Gist 复制链接，表格→列表/图，行内码→「」）
              ─→ Typefully 草稿（标题取 H1，可传封面）─→ 预览确认 ─→ 排期
 
 链接 +「深度」─→ 细读全文 ─→ 总结 + 观点讨论底稿 ─→ 与你多轮讨论、校准立场
@@ -46,9 +46,10 @@
 | [Buffer](https://buffer.com) 账号 + API key | 短推发布/排期（免费版够用：3 频道 / 10 条排期） | ✅（短推） |
 | GitHub 公开仓库 ×1 | 短推配图图床（Buffer 只收公开 URL，不能传本地文件；**长文 Article 正文图走 Typefully 媒体，不用图床**） | 短推配图时 |
 | [Codex CLI](https://github.com/openai/codex) | AI 海报（`gpt-image-2` 生底图 + Pillow 叠字，中文 100% 准确） | 可选 |
-| Puppeteer | HTML 模板海报兜底、代码块/表格转图 | **发带代码/表格的长文必需**（`cd skills/x-post-scheduler/scripts && npm install`）；纯短推可省 |
+| Puppeteer Core + 系统浏览器 | HTML 模板海报兜底、代码块/表格转图；复用已安装的 Chrome/Edge/Chromium，不另下载浏览器 | **发带代码/表格的长文必需**（`cd skills/x-post-scheduler/scripts && npm install`）；纯短推可省 |
 | [Typefully](https://typefully.com) 账号 + API key | 长文 X Article 排期（X 原生不支持 Article 排期） | 可选（长文） |
 | [freeze](https://github.com/charmbracelet/freeze) | 代码块语法高亮图（`brew install charmbracelet/tap/freeze`） | 可选（缺了走 Puppeteer 兜底） |
+| [GitHub CLI](https://cli.github.com/) 或带 Gist 权限的 token | 为 Article 的代码图生成可复制源码链接（一篇文章一个 secret Gist） | 可选（失败只警告，不阻塞发文） |
 
 发 Article 需要 X 账号有 Premium；长推不限字数需要 Premium+（免费账号 skill 会按 280 计数字符控制篇幅）。
 
@@ -109,6 +110,7 @@ git clone https://github.com/<you>/post-assets.git
 ```bash
 node skills/x-post-scheduler/scripts/buffer-post.mjs --check
 node skills/x-post-scheduler/scripts/typefully-post.mjs --check   # 用长文功能才需要
+node skills/x-post-scheduler/scripts/gist.mjs --check             # Article 代码复制链接
 ```
 
 ## 使用
@@ -133,7 +135,7 @@ https://example.com/some-article 深度读一下   ← deep-read skill：总结+
 
 - **GitHub raw 返回 429 不用等**——那是对你本机 curl 的限流，Buffer 服务器从自己的 IP 取图不受影响，push 成功就直接发。
 - **海报要点符号用「•」别用「▸」**——中文字体缺 ▸ 字形，会渲染成豆腐块。
-- **X Article 的 Markdown 子集很小，正文图还必须走 Typefully 媒体**——代码块降级成引用、表格不渲染、行内反引号原样显示，而且**外链 markdown 图 `![](url)` 不会内嵌、只显示成链接文本**（实测踩过）。`md-assets.mjs` + `typefully-post.mjs` 自动分流：多行代码/大表格→图片并**上传 Typefully、用 `<typ:media>` 标签嵌入**（不走 github 图床）、小表格→列表、行内码→「」、H3+→加粗行。
+- **X Article 的 Markdown 子集很小，正文图还必须走 Typefully 媒体**——代码块降级成引用、表格不渲染、行内反引号原样显示，而且**外链 markdown 图 `![](url)` 不会内嵌、只显示成链接文本**（实测踩过）。`md-assets.mjs` + `typefully-post.mjs` 自动分流：多行代码/大表格→图片并**上传 Typefully、用 `<typ:media>` 标签嵌入**（不走 github 图床），多行代码另建一个 secret Gist 并在每张图下附复制深链；小表格→列表、行内码→「」、H3+→加粗行。Gist 认证不可用时只跳过复制链接，不阻塞 Article。
 - **Typefully 的 Article 标题取自正文首个 H1**，`title` 字段不存在（传了报 422）；frontmatter 会被自动剥掉。
 - **`dueAt` 必须是未来时间**——确认拖过了预定时间就近立即发，agent 会在报告里说明。
 - **freeze 的 stdin 必须接 `/dev/null`**——给 pipe 它会忽略文件参数报 "No input"（脚本内已处理）。
@@ -151,7 +153,9 @@ skills/
 │   │   ├── buffer-post.mjs  # Buffer 发布（零依赖，直连 MCP 端点；--thread-file 发线程，--dry-run 自检字数）
 │   │   ├── typefully-post.mjs # Typefully 长文 Article
 │   │   ├── md-assets.mjs    # Markdown → X 化排版预处理
-│   │   └── render.js        # HTML 模板海报兜底（需 puppeteer）
+│   │   ├── gist.mjs         # Article 代码块 → 单个多文件 Gist（可复制源码）
+│   │   ├── browser.mjs      # 复用系统 Chrome/Edge/Chromium
+│   │   └── render.js        # HTML 模板海报兜底（需 puppeteer-core）
 │   └── templates/poster.html
 ├── deep-read/               # 深度阅读 → 讨论校准 → 读后感/线程
 │   └── SKILL.md

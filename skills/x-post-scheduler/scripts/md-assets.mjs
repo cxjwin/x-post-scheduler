@@ -27,6 +27,8 @@ import os from 'os';
 import path from 'path';
 import { execSync, execFileSync } from 'child_process';
 import { loadConfig, deriveRawBase } from './config.mjs';
+import { launchBrowser } from './browser.mjs';
+import { gistFileAnchor, gistFileName } from './gist.mjs';
 
 // 小表格判定：不超过这个规模就改写成列表而不是出图
 const SMALL_TABLE_MAX_COLS = 2;
@@ -207,8 +209,7 @@ function tableHtml(header, data) {
 }
 
 async function renderHtmlToPng(html, minWidth) {
-  const puppeteer = (await import('puppeteer')).default;
-  const browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox'] });
+  const browser = await launchBrowser();
   try {
     const page = await browser.newPage();
     await page.setViewport({ width: minWidth, height: 10, deviceScaleFactor: 2 });
@@ -241,12 +242,19 @@ function pushToImageBed(bedDir, files) {
 /**
  * X 化排版：按元素类型分流转换 markdown 正文。
  * @param {string} mdBody 已去掉 frontmatter 的 markdown 正文
- * @param {{slug:string, push?:boolean, outDir?:string, rawBase?:string}} opts
+ * @param {{slug:string, push?:boolean, outDir?:string, rawBase?:string, codeCopyBaseUrl?:string}} opts
  *   slug 用于图床文件名；push=false 时图片只写本地不推图床（自测用）；
- *   outDir/rawBase 缺省时取配置（assets_dir / assets_raw_base，后者可从 git remote 推导）
+ *   outDir/rawBase 缺省时取配置（assets_dir / assets_raw_base，后者可从 git remote 推导）；
+ *   codeCopyBaseUrl 存在时，每张代码图下附对应 Gist 文件的复制链接
  * @returns {Promise<{md:string, assets:Array<{kind:string,url:string,localPath:string}>, stats:object}>}
  */
-export async function transformMarkdownBody(mdBody, { slug, push = true, outDir, rawBase }) {
+export async function transformMarkdownBody(mdBody, {
+  slug,
+  push = true,
+  outDir,
+  rawBase,
+  codeCopyBaseUrl,
+}) {
   const cfg = loadConfig();
   const base = slugify(slug);
   const stats = { codeImg: 0, codeLine: 0, tableImg: 0, tableList: 0, inline: 0, heading: 0 };
@@ -306,7 +314,17 @@ export async function transformMarkdownBody(mdBody, { slug, push = true, outDir,
     if (!rendered) {
       fs.writeFileSync(p, await renderHtmlToPng(codeHtml(b.code, b.lang), 920));
     }
-    assets.push({ kind: 'code', id: `@@${b.id}@@`, url: urlBase + encodeURIComponent(name), localPath: p });
+    const gistName = gistFileName(ci, b.lang);
+    const copyUrl = codeCopyBaseUrl
+      ? `${codeCopyBaseUrl.replace(/#.*$/, '')}#${gistFileAnchor(gistName)}`
+      : null;
+    assets.push({
+      kind: 'code',
+      id: `@@${b.id}@@`,
+      url: urlBase + encodeURIComponent(name),
+      localPath: p,
+      copyUrl,
+    });
     stats.codeImg++;
   }
 
@@ -333,7 +351,8 @@ export async function transformMarkdownBody(mdBody, { slug, push = true, outDir,
   for (const r of replacements) out = out.split(r.id).join(r.text);
   for (const a of assets) {
     const alt = a.kind === 'code' ? '代码块' : '表格';
-    out = out.split(a.id).join(`![${alt}](${a.url})`);
+    const copyLink = a.copyUrl ? `\n\n[复制这段代码](${a.copyUrl})` : '';
+    out = out.split(a.id).join(`![${alt}](${a.url})${copyLink}`);
   }
   out = out.replace(/\n{3,}/g, '\n\n'); // 占位符前后补的换行会产生连续空行，收敛成一个
   return { md: out, assets, stats };

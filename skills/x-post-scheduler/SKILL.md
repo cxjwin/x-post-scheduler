@@ -115,7 +115,7 @@ node .claude/skills/x-post-scheduler/scripts/render.js \
 ```
 
 - PNG 输出到配置的 output_dir（默认 `./output/`，脚本会自动建目录）；不传 `--out` 时文件名自动用「日期-标题 slug」；`handle` 字段缺省时自动取配置。
-- 脚本报 puppeteer 未安装时，把它打印的安装命令转告用户（或经用户同意后代为执行）。
+- 脚本报 `puppeteer-core` 未安装或找不到系统浏览器时，把它打印的安装/配置指引转告用户（或经用户同意后代为执行）。渲染器复用本机 Chrome/Edge/Chromium，不下载独立 Chromium。
 - 模板在 `templates/poster.html`，配色集中在顶部 CSS 变量，方便改成自己的品牌色。
 
 ### 收尾（两种方式通用）
@@ -202,6 +202,7 @@ node .claude/skills/x-post-scheduler/scripts/typefully-post.mjs --check
 node .claude/skills/x-post-scheduler/scripts/typefully-post.mjs \
   --markdown-file 文章.md \
   [--cover 封面.png] \
+  [--no-gist | --gist-url "已有 Gist URL"] \
   [--publish-at "2026-07-16T08:00:00+08:00" | --publish-at now]   # 不带此参数=仅存草稿；now=立即发布
 ```
 
@@ -211,6 +212,7 @@ node .claude/skills/x-post-scheduler/scripts/typefully-post.mjs \
 - 发布方式：`--publish-at` 传明确 ISO 时间则排期，传 `now` 则立即发布（脚本会把 `now` 转成近未来 ISO——**Typefully 不接受 "now" 字符串，直传会被静默当草稿存下、不发布**）；不带 `--publish-at` 仅存草稿
 - **发布后必须回读真实状态**：创建响应里的 `status` 是瞬时值（`publish_at` 生效后其实可能已 published，响应仍显示 draft），脚本已内置轮询 `GET drafts/{id}` 确认最终状态并打印 `x_article_published_url`，别只信创建响应
 - token 从环境变量 `TYPEFULLY_KEY` 或 `~/.config/typefully/key` 读取；social set 未配置时自动发现（恰好一个时）
+- 多行代码块默认汇总成**一篇 Article 一个 secret Gist**，每张代码图下附对应文件的「复制这段代码」深链；认证按已登录 `gh` CLI → `GH_TOKEN`/`GITHUB_TOKEN`。认证不可用时只警告并继续发文；`--no-gist` 可关闭，`--gist-url` 可复用已有 Gist，避免重建
 - 已验证的 API 事实：`x_article.content_markdown` 为正文字段，**文章标题取自正文首个 H1**（`x_article` 下没有 `title` 字段，传了报 422 extra_forbidden）；封面走 `--cover`（顶层 `cover_media_id`）；frontmatter 会被脚本自动剥掉。改错草稿用 `DELETE /v2/social-sets/{ss}/drafts/{id}`（实测返回 204；已发布的 Article 删 Typefully 记录**不撤回** X 上的原生文章，需在 X 手动删）
 - 发布 Article 需要账号有 X Premium
 
@@ -220,7 +222,7 @@ X Article 的 markdown 子集只支持标题(H1/H2)/粗体/引用/列表/链接�
 
 | 元素 | 处理 |
 |------|------|
-| 多行代码块 | 渲染成语法高亮 PNG（freeze github-dark；**代码含中文或 freeze 不可用时退回 puppeteer 深色模板**，freeze 对 CJK 缺字体防豆腐块），上传 Typefully 后以 `<typ:media>` 原位嵌入 |
+| 多行代码块 | 渲染成语法高亮 PNG（freeze github-dark；**代码含中文或 freeze 不可用时退回系统浏览器深色模板**，freeze 对 CJK 缺字体防豆腐块），上传 Typefully 后以 `<typ:media>` 原位嵌入；图下附对应 Gist 文件的复制深链 |
 | 单行代码块 | 转正文文本行（shell 类语言加「$ 」前缀），不出图 |
 | 表格 ≤2 列且 ≤8 行 | 改写成「- **键**：值」列表（手机端列表比表格图好读，这是升级不是妥协） |
 | 更大的表格 | 深色 GitHub 风 PNG（#0d1117 底，与海报视觉统一），同样走 `<typ:media>` 嵌入 |
@@ -229,7 +231,8 @@ X Article 的 markdown 子集只支持标题(H1/H2)/粗体/引用/列表/链接�
 
 - **正文图走 Typefully 媒体，不走 github 图床**：`typefully-post.mjs` 把图生成到本地临时目录，逐张 `media/upload`（POST 拿预签名 URL → 裸 PUT 字节 → 轮询 `ready`）拿 `media_id` 再替换成 `<typ:media>`。所以发 Article **不需要 `assets_dir` 图床**（那是短推 Buffer 用的），也不用担心图床图被删导致文章裂图
 - **上传的 `file_name` 必须是 ASCII**：Typefully 校验 `^[a-zA-Z0-9_.()\-]+\.(png|jpg|...)$`，中文名会 422；脚本用 `code-1.png`/`table-1.png` 这类 ASCII 名，与本地中文 slug 解耦
-- 依赖 freeze：`brew install charmbracelet/tap/freeze`；未安装不阻塞，所有代码块走 **puppeteer** 兜底——所以**发带代码块/表格的长文，puppeteer 是必需依赖**（`cd scripts && npm install`），缺了预处理会直接失败
+- 依赖 freeze：`brew install charmbracelet/tap/freeze`；未安装不阻塞，所有代码块走 **puppeteer-core + 系统浏览器**兜底——所以**发带代码块/表格的长文，`npm install` 与本机 Chrome/Edge/Chromium 是必需条件**（`cd scripts && npm install`），也可用 `CHROME_PATH` 显式指定浏览器
+- Gist 通道自检：`node .claude/skills/x-post-scheduler/scripts/gist.mjs --check`（只检查认证，不创建 Gist）
 - 独立自测（`md-assets.mjs --test` 默认不 push、图片落在 `<output_dir>/md-assets-test/`，仅用于肉眼检查转换结果）：
 
 ```bash

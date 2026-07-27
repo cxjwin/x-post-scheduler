@@ -7,7 +7,8 @@
 //       连通性检查（列出 social sets，不产生任何草稿）
 //   node typefully-post.mjs --markdown-file article.md \
 //       [--publish-at "2026-07-16T08:00:00+08:00" | --publish-at now | --publish-at next-free-slot] \
-//       [--cover /path/to/cover.png] [--draft-title "内部草稿名"] [--social-set <id>] [--no-transform]
+//       [--cover /path/to/cover.png] [--draft-title "内部草稿名"] [--social-set <id>] \
+//       [--no-transform] [--no-gist | --gist-url <已有 gist URL>]
 //       创建 X Article：正文为 Markdown，文章标题自动取自首个 # 一级标题。
 //       不带 --publish-at 时仅存为草稿（可在 Typefully 里预览后再排期）。
 //
@@ -20,6 +21,7 @@ import { homedir, tmpdir } from 'os';
 import { basename, join } from 'path';
 import { transformMarkdownBody } from './md-assets.mjs';
 import { loadConfig } from './config.mjs';
+import { createCodeGist, extractCodeFiles } from './gist.mjs';
 
 const BASE = 'https://api.typefully.com';
 const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -42,6 +44,8 @@ function parseArgs(argv) {
     else if (k === '--draft-title') a.draftTitle = argv[++i];
     else if (k === '--social-set') a.socialSet = argv[++i];
     else if (k === '--no-transform') a.noTransform = true;
+    else if (k === '--no-gist') a.noGist = true;
+    else if (k === '--gist-url') a.gistUrl = argv[++i];
   }
   return a;
 }
@@ -144,7 +148,26 @@ if (!h1) console.error('警告：Markdown 中没有一级标题（# ...），文
 if (!a.noTransform) {
   const slug = (h1 ? h1[1] : basename(a.mdFile, '.md')).trim();
   const tmpDir = join(tmpdir(), 'xps-article-media');
-  const { md: transformed, assets, stats } = await transformMarkdownBody(md, { slug, push: false, outDir: tmpDir });
+  const codeFiles = extractCodeFiles(md);
+  let gistUrl = a.gistUrl || null;
+  if (codeFiles.length && !gistUrl && !a.noGist) {
+    try {
+      const gist = await createCodeGist({
+        files: codeFiles,
+        description: `X Article：${h1 ? h1[1].trim() : slug}`,
+      });
+      gistUrl = gist.url;
+      console.log(`代码 Gist：${gist.url}（${codeFiles.length} 个文件，secret）`);
+    } catch (e) {
+      console.error(`警告：代码 Gist 创建失败，文章仍会继续，但代码图下没有复制链接：${e.message || e}`);
+    }
+  }
+  const { md: transformed, assets, stats } = await transformMarkdownBody(md, {
+    slug,
+    push: false,
+    outDir: tmpDir,
+    codeCopyBaseUrl: gistUrl,
+  });
   if (transformed !== md) {
     md = transformed;
     let idx = 0;
