@@ -12,6 +12,12 @@
 //       [--channel <channelId>]
 //       发帖：不带 --due-at 即立即发布，带则定时排期。
 //       推文文本从 --text-file 读取（避免 shell 转义问题）。
+//   node buffer-post.mjs --thread-file thread.txt [同上可选参数]
+//       发线程：文件内各条推文之间用「单独一行 ---」分隔，首条为主推（配图只挂首条），
+//       其余按序作为线程回复，一次 create_post 完成；--first-comment 仍会追加为最后一条。
+//       与 --text-file 互斥。
+//   加 --dry-run：只打印分条结果和每条的 X 计数字符估算（CJK 记 2、ASCII 记 1、URL 记 23），
+//       不做任何网络请求、不发帖——供发线程前自检长度。
 //
 // token 来源（按序尝试）：环境变量 BUFFER_TOKEN → ~/.config/buffer/key → ~/.claude.json 的 buffer MCP 配置。
 // 频道来源（按序尝试）：--channel → 配置（XPS_BUFFER_CHANNEL / config.json 的 buffer_channel_id）
@@ -42,7 +48,9 @@ function parseArgs(argv) {
   for (let i = 0; i < argv.length; i++) {
     const k = argv[i];
     if (k === '--check') a.check = true;
+    else if (k === '--dry-run') a.dryRun = true;
     else if (k === '--text-file') a.textFile = argv[++i];
+    else if (k === '--thread-file') a.threadFile = argv[++i];
     else if (k === '--image-url') a.imageUrl = argv[++i];
     else if (k === '--alt') a.alt = argv[++i];
     else if (k === '--first-comment') a.firstComment = argv[++i];
@@ -103,7 +111,46 @@ async function resolveChannel(token, cfg) {
   process.exit(1);
 }
 
+// X 计数字符估算：URL 记 23；twitter-text v3 权重 1 的区间（基本拉丁等）记 1，其余（含 CJK；emoji 按码点会略高估）记 2。
+function xWeight(s) {
+  let n = 0;
+  const rest = s.replace(/https?:\/\/\S+/g, () => { n += 23; return ''; });
+  for (const ch of rest) {
+    const c = ch.codePointAt(0);
+    n += (c <= 0x10ff || (c >= 0x2000 && c <= 0x200d) || (c >= 0x2010 && c <= 0x201f) || (c >= 0x2032 && c <= 0x2037)) ? 1 : 2;
+  }
+  return n;
+}
+
 const a = parseArgs(process.argv.slice(2));
+
+if (a.textFile && a.threadFile) {
+  console.error('错误：--text-file 与 --thread-file 只能二选一。');
+  process.exit(1);
+}
+
+// 推文分条：--thread-file 按「单独一行 ---」分隔为多条线程；--text-file 整个文件为单条。
+const segments = a.threadFile
+  ? readFileSync(a.threadFile, 'utf8').split(/^[ \t]*-{3,}[ \t]*\r?$/m).map((s) => s.trim()).filter(Boolean)
+  : a.textFile ? [readFileSync(a.textFile, 'utf8').trim()] : [];
+
+if (!a.check && !segments.length) {
+  console.error(a.threadFile
+    ? '错误：--thread-file 内容为空（各条之间用单独一行 --- 分隔）。'
+    : '错误：缺少 --text-file 或 --thread-file（或使用 --check 做连通性检查）。');
+  process.exit(1);
+}
+
+if (a.dryRun) {
+  segments.forEach((s, i) => {
+    const w = xWeight(s);
+    console.log(`--- [${i + 1}/${segments.length}] 计数字符 ≈ ${w}${w > 280 ? '（超 280：免费档发不出；Premium+ 可发但时间线折叠）' : ''} ---`);
+    console.log(s);
+  });
+  if (a.firstComment) console.log(`--- [首评] 计数字符 ≈ ${xWeight(a.firstComment)} ---\n${a.firstComment}`);
+  process.exit(0);
+}
+
 const token = getToken();
 const cfg = loadConfig();
 
@@ -113,19 +160,14 @@ if (a.check) {
   process.exit(0);
 }
 
-if (!a.textFile) {
-  console.error('错误：缺少 --text-file（或使用 --check 做连通性检查）。');
-  process.exit(1);
-}
-
-const text = readFileSync(a.textFile, 'utf8').trim();
+const text = segments[0];
 const channelId = a.channel || await resolveChannel(token, cfg);
 
 const assets = a.imageUrl
   ? [{ image: { url: a.imageUrl, metadata: { altText: a.alt || '配图' } } }]
   : [];
 
-const thread = [{ text, ...(assets.length ? { assets } : {}) }];
+const thread = segments.map((t, i) => (i === 0 && assets.length ? { text: t, assets } : { text: t }));
 if (a.firstComment) thread.push({ text: a.firstComment });
 
 const payload = {

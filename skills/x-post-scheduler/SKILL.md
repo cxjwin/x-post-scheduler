@@ -1,6 +1,6 @@
 ---
 name: x-post-scheduler
-description: 把资讯文章链接变成 X (Twitter) 帖子并通过 Buffer 发布/排期：抓取原文 → 自主选风格写中文摘要短评（单版本）→ 生成海报（可选）→ 发布前人工确认（可在本文件内开启全自动）→ 立即发布或按用户指定时间排期 → 原文链接放首条评论。另含长文支线：用户说「发长文」「排期 Article」时经 Typefully 发布 X Article。当用户给出文章链接（AI / 编程资讯为主）并希望发到 X 时使用本 skill——即使只丢一个链接不带说明，也应触发流程（默认会在发布前请用户确认）。一次给多个链接时，逐篇独立走完整流程。
+description: 把资讯文章链接变成 X (Twitter) 帖子并通过 Buffer 发布/排期：抓取原文 → 自主选风格写中文摘要短评（单版本）→ 生成海报（可选）→ 发布前人工确认（可在本文件内开启全自动）→ 立即发布或按用户指定时间排期 → 原文链接放首条评论。另含长文支线：用户说「发长文」「排期 Article」时经 Typefully 发布 X Article。当用户给出文章链接（AI / 编程资讯为主）并希望发到 X 时使用本 skill——即使只丢一个链接不带说明，也应触发流程（默认会在发布前请用户确认）。一次给多个链接时，逐篇独立走完整流程。注意：提示词带「深度」二字（「深度读一下」「这篇走深度」）时不走本流水线，改用 deep-read skill（互动式深读 → 讨论校准 → 读后感/线程）。
 ---
 
 # x-post-scheduler：资讯 → 摘要短评 + 海报 → Buffer 发布/排期
@@ -243,6 +243,6 @@ node .claude/skills/x-post-scheduler/scripts/md-assets.mjs --test 文章.md
 - 频道 ID 用 `list_channels` 确认；报「channel not found」时重新确认（脚本的自动发现即此流程）
 - **图片限制：`assets[].image.url` 只收可公开访问的 URL，不能直接传本地 PNG 路径**。已用 `introspect_schema` 确认：GraphQL 没有任何媒体上传 mutation，不用再探查
 - **图片清理策略（实测确认）**：`get_post` 返回的 `assets[].source` 保持原 raw URL，**Buffer 不转存图片**。因此：排期未发出的帖子，图床上的图绝不可删；帖子发出（status: sent）后随便删（X 已转存到 pbs.twimg.com）
-- **thread 首评（实测确认可用）**：外层 `text` 与 `metadata.twitter.thread[0].text` 一致，图片资产同时放外层 `assets` 和 `thread[0].assets`，首评「原文：{URL}」作为 `thread[1]`，一次 `create_post` 即完成主推 + 首评
+- **thread 首评（实测确认可用）**：外层 `text` 与 `metadata.twitter.thread[0].text` 一致，图片资产同时放外层 `assets` 和 `thread[0].assets`，首评「原文：{URL}」作为 `thread[1]`，一次 `create_post` 即完成主推 + 首评。多条线程（deep-read skill 用）走同一通道：脚本 `--thread-file`（各条之间用单独一行 `---` 分隔）把全部条目放进 `thread[]`；>2 条属 MCP schema 文档能力、尚未单独实测，首发后到 X 核对整串
 - 排期模式：明确时间用 `mode: customScheduled` + `dueAt`（ISO 8601 带时区偏移，**必须是未来时间**）；`schedulingType` 用 `automatic`（自动发布）
 - 免费版限额：3 频道 / 10 条排期，够个人号用

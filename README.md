@@ -1,16 +1,17 @@
 # x-post-scheduler
 
-把内容变成 X (Twitter) 帖子的 Claude Code Skill 套件：丢一个文章链接，agent 自动抓取、写摘要短评、生成海报、经 Buffer 发布或排期；也能写段子、发长文 Article。
+把内容变成 X (Twitter) 帖子的 Claude Code Skill 套件：丢一个文章链接，agent 自动抓取、写摘要短评、生成海报、经 Buffer 发布或排期；也能写段子、发长文 Article，或加「深度」二字进入精读模式——讨论校准观点后排成读后感/线程。
 
 ![AI 海报示例：Codex gpt-image-2 生成底图 + Pillow 叠字，中文 100% 准确](docs/example-poster.png)
 
-> **English**: A Claude Code skill suite that turns content into X (Twitter) posts. Drop an article link and the agent fetches it, writes a commentary-style summary in your voice, generates a themed poster (optional, via Codex `gpt-image-2` or a Puppeteer HTML template), and publishes/schedules through Buffer — with the source link as the first reply. Also includes an original-meme skill and long-form X Article publishing via Typefully (with automatic Markdown→X-flavor preprocessing: code blocks → syntax-highlighted images, tables → lists or images). Docs below are in Chinese; the scripts are zero-dependency Node and self-documenting.
+> **English**: A Claude Code skill suite that turns content into X (Twitter) posts. Drop an article link and the agent fetches it, writes a commentary-style summary in your voice, generates a themed poster (optional, via Codex `gpt-image-2` or a Puppeteer HTML template), and publishes/schedules through Buffer — with the source link as the first reply. Also includes an original-meme skill, an interactive deep-reading mode (full-text read → viewpoint discussion & calibration with you → reflection post or thread), and long-form X Article publishing via Typefully (with automatic Markdown→X-flavor preprocessing: code blocks → syntax-highlighted images, tables → lists or images). Docs below are in Chinese; the scripts are zero-dependency Node and self-documenting.
 
-## 三大功能
+## 四大功能
 
 | 功能 | 入口 | 配图 | 发布通道 | 确认策略 |
 |------|------|------|---------|---------|
 | **资讯短推** | 丢一个文章链接 | 海报（可选：AI 生成 / HTML 模板 / 不配图） | Buffer | 默认发布前确认，可开全自动 |
+| **深度读后感/线程** | 链接 + 提示词带「深度」 | 默认不配图 | Buffer（长推/线程），超长可走 Typefully | 全程讨论校准，必须人工确认（不适用自动授权） |
 | **段子短推** | 「来条段子」「这个帖子二创一下」 | 原帖有图才二创配图（可选） | Buffer | 必须人工挑选（不适用自动授权） |
 | **长文 Article** | 「发长文」「把这篇 Markdown 排期成 Article」 | 封面（可选） | Typefully | 先建草稿给预览链接，确认后排期 |
 
@@ -26,6 +27,9 @@
 
 长文 Markdown ─→ X 化排版（代码块→高亮图，表格→列表/图，行内码→「」）
              ─→ Typefully 草稿（标题取 H1，可传封面）─→ 预览确认 ─→ 排期
+
+链接 +「深度」─→ 细读全文 ─→ 总结 + 观点讨论底稿 ─→ 与你多轮讨论、校准立场
+            ─→ 读后感长推 / 3~7 条线程（每条自动算计数字符）─→ 确认后 Buffer 发布/排期
 ```
 
 设计上有两条底线：
@@ -115,6 +119,7 @@ node skills/x-post-scheduler/scripts/typefully-post.mjs --check   # 用长文功
 https://example.com/some-article            ← 丢链接，走完整流程，发布前给你确认
 https://example.com/some-article 明早 8 点发  ← 指定时间则排期
 这篇暖心一点 / 毒舌一点 / 不配图            ← 风格和配图都可以指定
+https://example.com/some-article 深度读一下   ← deep-read skill：总结+观点→讨论校准→读后感/线程
 来条段子 / 看看今天有什么梗                  ← meme-post skill
 把这篇 Markdown 发成长文 Article，周五中午    ← Typefully 长文支线
 删掉                                        ← 发布后报告里随时反悔
@@ -143,11 +148,13 @@ skills/
 │   ├── SKILL.md             # 流程、风格规范、红线、全部实测经验
 │   ├── scripts/
 │   │   ├── config.mjs       # 配置加载（config.json + 环境变量 + 自动发现）
-│   │   ├── buffer-post.mjs  # Buffer 发布（零依赖，直连 MCP 端点，任何 agent 可用）
+│   │   ├── buffer-post.mjs  # Buffer 发布（零依赖，直连 MCP 端点；--thread-file 发线程，--dry-run 自检字数）
 │   │   ├── typefully-post.mjs # Typefully 长文 Article
 │   │   ├── md-assets.mjs    # Markdown → X 化排版预处理
 │   │   └── render.js        # HTML 模板海报兜底（需 puppeteer）
 │   └── templates/poster.html
+├── deep-read/               # 深度阅读 → 讨论校准 → 读后感/线程
+│   └── SKILL.md
 └── meme-post/               # 热梗雷达 → 原创二创段子
     └── SKILL.md
 ```
