@@ -1,15 +1,18 @@
 #!/usr/bin/env node
 // gist.mjs — X Article 代码块的「可复制」配套通道：一篇文章一个 GitHub Gist，
-// 每个多行代码块一个文件。
+// gist 内是**一个 markdown 文件**，用「## 代码块 N」中文标题串起全部代码块。
 //
-// 背景：X Article 不支持代码块，md-assets.mjs 把多行代码块渲染成高亮图片，读者
-// 无法复制。本模块把这些代码块原文打包成**一个** gist（不是一块一个 gist——gist
-// 原生支持多文件，一文一 gist 才不会刷屏个人 gist 列表、评论区也只需要一条链接）：
-//   - 文件名 01.sh / 02.py …（gist 页面按文件名字母序展示，零填充数字前缀保证
-//     展示顺序与文中出现顺序一致）
-//   - 每个文件在 gist 页面有稳定锚点（01.sh → #file-01-sh），正文可在每张代码图
-//     下方挂「复制这段代码」深链，读者点开直达对应文件
-//   - gist 描述放文章标题，整个 gist 即这篇文章的代码索引
+// 背景：X Article 不支持代码块，md-assets.mjs 把多行代码块渲染成高亮图片（图上
+// 带同款「代码块 N」标题栏），读者无法复制。本模块把这些代码块原文按序组织成
+// 单个 markdown 文档打包进一个 gist：
+//   - 文档结构：## 代码块 1 → 语言围栏代码 → ## 代码块 2 → …（buildGistDoc）；
+//     GitHub 渲染后每个围栏块自带复制按钮，中文标题与文中代码图标题一字不差，
+//     读者打开一个链接即可对照复制全部代码
+//   - 每个标题在 gist 页面有稳定锚点：## 代码块 1 → user-content-代码块-1，
+//     链接片段用 #代码块-1（实测 GitHub 自家目录即此格式，空格转 -；嵌入 X 正文
+//     时用 percent-encoded 形式防链接解析截断，见 gistDocAnchor）
+//   - gist 描述放文章标题，整个 gist 即这篇文章的代码附录
+//   - 围栏长度按内容自适应（内容含 ``` 时升级为更长围栏，防嵌套冲突）
 //
 // 默认创建 secret gist（未列出：仅持链接可见、不进个人 gist 公开列表、不被搜索
 // 索引）。Article 走「先草稿后人工确认」流程，gist 在草稿阶段就会创建——未列出
@@ -47,8 +50,37 @@ export function gistFileName(i, lang) {
 }
 
 // gist 页面的文件锚点规则：file- + 文件名小写、非字母数字一律替换为 -
+// （多文件 gist 用；当前 Article 流程为单文档 gist，深链走 gistDocAnchor 标题锚点）
 export function gistFileAnchor(fileName) {
   return 'file-' + fileName.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+}
+
+// 文档内第 i 块的中文标题与其 GitHub 锚点。
+// GitHub 对「## 代码块 1」生成 id="user-content-代码块-1"、可用片段 #代码块-1
+//（实测本仓库 README 的中文标题即此规则：空格→-，CJK 原样保留）。
+// 返回 percent-encoded 形式：X 正文/推文里的 URL 含原始中文时可能被链接解析截断。
+export function gistDocHeading(i) {
+  return `代码块 ${i}`;
+}
+export function gistDocAnchor(i) {
+  return encodeURIComponent(gistDocHeading(i).replace(/ /g, '-'));
+}
+
+/**
+ * 把 extractCodeFiles 的结果组织成单个 markdown 文档（一个 gist 只放这一个文件）。
+ * 结构：## 代码块 N + 语言围栏代码，标题与 md-assets.mjs 渲染的代码图标题栏一致。
+ * 围栏长度自适应：内容里出现 ≥3 个连续反引号时加长围栏，避免嵌套冲突。
+ * @param {Array<{content:string, lang:string}>} files extractCodeFiles 的返回值
+ * @returns {{name:string, content:string}} 可直接作为 createCodeGist 的唯一文件
+ */
+export function buildGistDoc(files) {
+  const sections = files.map((f, idx) => {
+    const runs = f.content.match(/`+/g) || [];
+    const longest = runs.reduce((n, s) => Math.max(n, s.length), 0);
+    const fence = '`'.repeat(Math.max(3, longest + 1));
+    return `## ${gistDocHeading(idx + 1)}\n\n${fence}${f.lang || ''}\n${f.content}\n${fence}`;
+  });
+  return { name: 'code.md', content: sections.join('\n\n') + '\n' };
 }
 
 /**

@@ -135,7 +135,7 @@ https://example.com/some-article 深度读一下   ← deep-read skill：总结+
 
 - **GitHub raw 返回 429 不用等**——那是对你本机 curl 的限流，Buffer 服务器从自己的 IP 取图不受影响，push 成功就直接发。
 - **海报要点符号用「•」别用「▸」**——中文字体缺 ▸ 字形，会渲染成豆腐块。
-- **X Article 的 Markdown 子集很小，正文图还必须走 Typefully 媒体**——代码块降级成引用、表格不渲染、行内反引号原样显示，而且**外链 markdown 图 `![](url)` 不会内嵌、只显示成链接文本**（实测踩过）。`md-assets.mjs` + `typefully-post.mjs` 自动分流：多行代码/大表格→图片并**上传 Typefully、用 `<typ:media>` 标签嵌入**（不走 github 图床），多行代码另建一个 secret Gist 并在每张图下附复制深链；小表格→列表、行内码→「」、H3+→加粗行。Gist 认证不可用时只跳过复制链接，不阻塞 Article。
+- **X Article 的 Markdown 子集很小，正文图还必须走 Typefully 媒体**——代码块降级成引用、表格不渲染、行内反引号原样显示，而且**外链 markdown 图 `![](url)` 不会内嵌、只显示成链接文本**（实测踩过）。`md-assets.mjs` + `typefully-post.mjs` 自动分流：多行代码/大表格→图片并**上传 Typefully、用 `<typ:media>` 标签嵌入**（不走 github 图床）；**每张代码图带「代码块 N」标题栏**，全文代码汇总成一个 secret Gist（单 markdown 文档，同款「## 代码块 N」标题，每块自带复制按钮），图下深链按标题锚点直达对应块；小表格→列表、行内码→「」、H3+→加粗行。Gist 认证不可用时只跳过复制链接，不阻塞 Article。
 - **Typefully 的 Article 标题取自正文首个 H1**，`title` 字段不存在（传了报 422）；frontmatter 会被自动剥掉。
 - **`dueAt` 必须是未来时间**——确认拖过了预定时间就近立即发，agent 会在报告里说明。
 - **freeze 的 stdin 必须接 `/dev/null`**——给 pipe 它会忽略文件参数报 "No input"（脚本内已处理）。
@@ -154,7 +154,7 @@ skills/
 │   │   ├── buffer-post.mjs  # Buffer 发布（零依赖，直连 MCP 端点；--thread-file 发线程，--dry-run 自检字数）
 │   │   ├── typefully-post.mjs # Typefully 长文 Article + 短推/推串（--text-file/--thread-file，--dry-run 自检字数）
 │   │   ├── md-assets.mjs    # Markdown → X 化排版预处理
-│   │   ├── gist.mjs         # Article 代码块 → 单个多文件 Gist（可复制源码）
+│   │   ├── gist.mjs         # Article 代码块 → 单文档 Gist（「代码块 N」标题对照，可复制源码）
 │   │   ├── browser.mjs      # 复用系统 Chrome/Edge/Chromium
 │   │   └── render.js        # HTML 模板海报兜底（需 puppeteer-core）
 │   └── templates/poster.html

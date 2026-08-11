@@ -33,7 +33,7 @@ import { homedir, tmpdir } from 'os';
 import { basename, join } from 'path';
 import { transformMarkdownBody } from './md-assets.mjs';
 import { loadConfig } from './config.mjs';
-import { createCodeGist, extractCodeFiles } from './gist.mjs';
+import { buildGistDoc, createCodeGist, extractCodeFiles } from './gist.mjs';
 
 const BASE = 'https://api.typefully.com';
 const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -283,12 +283,14 @@ if (!a.noTransform) {
   let gistUrl = a.gistUrl || null;
   if (codeFiles.length && !gistUrl && !a.noGist) {
     try {
+      // 单文档 gist：全部代码块组织进一个 markdown 文件，「## 代码块 N」标题
+      // 与正文代码图的标题栏一字不差，图下深链按标题锚点直达对应块。
       const gist = await createCodeGist({
-        files: codeFiles,
+        files: [buildGistDoc(codeFiles)],
         description: `X Article：${h1 ? h1[1].trim() : slug}`,
       });
       gistUrl = gist.url;
-      console.log(`代码 Gist：${gist.url}（${codeFiles.length} 个文件，secret）`);
+      console.log(`代码 Gist：${gist.url}（${codeFiles.length} 个代码块，单文档，secret）`);
     } catch (e) {
       console.error(`警告：代码 Gist 创建失败，文章仍会继续，但代码图下没有复制链接：${e.message || e}`);
     }

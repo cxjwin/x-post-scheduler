@@ -212,7 +212,7 @@ node .claude/skills/x-post-scheduler/scripts/typefully-post.mjs \
 - 发布方式：`--publish-at` 传明确 ISO 时间则排期，传 `now` 则立即发布（脚本会把 `now` 转成近未来 ISO——**Typefully 不接受 "now" 字符串，直传会被静默当草稿存下、不发布**）；不带 `--publish-at` 仅存草稿
 - **发布后必须回读真实状态**：创建响应里的 `status` 是瞬时值（`publish_at` 生效后其实可能已 published，响应仍显示 draft），脚本已内置轮询 `GET drafts/{id}` 确认最终状态并打印 `x_article_published_url`，别只信创建响应
 - token 从环境变量 `TYPEFULLY_KEY` 或 `~/.config/typefully/key` 读取；social set 未配置时自动发现（恰好一个时）
-- 多行代码块默认汇总成**一篇 Article 一个 secret Gist**，每张代码图下附对应文件的「复制这段代码」深链；认证按已登录 `gh` CLI → `GH_TOKEN`/`GITHUB_TOKEN`。认证不可用时只警告并继续发文；`--no-gist` 可关闭，`--gist-url` 可复用已有 Gist，避免重建
+- 多行代码块默认汇总成**一篇 Article 一个 secret Gist**：gist 内是单个 markdown 文档，「## 代码块 N」中文标题与正文代码图的标题栏一字不差，GitHub 渲染后每块自带复制按钮；每张代码图下附「复制 代码块 N」深链，按标题锚点（`#代码块-N` 的 percent-encoded 形式）直达对应小节。认证按已登录 `gh` CLI → `GH_TOKEN`/`GITHUB_TOKEN`。认证不可用时只警告并继续发文；`--no-gist` 可关闭，`--gist-url` 可复用已有 Gist，避免重建
 - 已验证的 API 事实：`x_article.content_markdown` 为正文字段，**文章标题取自正文首个 H1**（`x_article` 下没有 `title` 字段，传了报 422 extra_forbidden）；封面走 `--cover`（顶层 `cover_media_id`）；frontmatter 会被脚本自动剥掉。改错草稿用 `DELETE /v2/social-sets/{ss}/drafts/{id}`（实测返回 204；已发布的 Article 删 Typefully 记录**不撤回** X 上的原生文章，需在 X 手动删）
 - 发布 Article 需要账号有 X Premium
 
@@ -222,7 +222,7 @@ X Article 的 markdown 子集只支持标题(H1/H2)/粗体/引用/列表/链接�
 
 | 元素 | 处理 |
 |------|------|
-| 多行代码块 | 渲染成语法高亮 PNG（freeze github-dark；**代码含中文或 freeze 不可用时退回系统浏览器深色模板**，freeze 对 CJK 缺字体防豆腐块），上传 Typefully 后以 `<typ:media>` 原位嵌入；图下附对应 Gist 文件的复制深链 |
+| 多行代码块 | 渲染成语法高亮 PNG，**图上带「代码块 N · 语言」标题栏**（freeze github-dark 出图后复合标题；**代码含中文或 freeze 不可用时退回系统浏览器深色模板**，freeze 对 CJK 缺字体防豆腐块），上传 Typefully 后以 `<typ:media>` 原位嵌入；图下附「复制 代码块 N」深链直达 gist 内同标题小节 |
 | 单行代码块 | 转正文文本行（shell 类语言加「$ 」前缀），不出图 |
 | 表格 ≤2 列且 ≤8 行 | 改写成「- **键**：值」列表（手机端列表比表格图好读，这是升级不是妥协） |
 | 更大的表格 | 深色 GitHub 风 PNG（#0d1117 底，与海报视觉统一），同样走 `<typ:media>` 嵌入 |

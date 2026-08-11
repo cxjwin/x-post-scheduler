@@ -28,7 +28,7 @@ import path from 'path';
 import { execSync, execFileSync } from 'child_process';
 import { loadConfig, deriveRawBase } from './config.mjs';
 import { launchBrowser } from './browser.mjs';
-import { gistFileAnchor, gistFileName } from './gist.mjs';
+import { gistDocAnchor, gistDocHeading } from './gist.mjs';
 
 // 小表格判定：不超过这个规模就改写成列表而不是出图
 const SMALL_TABLE_MAX_COLS = 2;
@@ -184,15 +184,33 @@ function renderCodeWithFreeze(freezeBin, code, lang, outPath) {
 }
 
 // ---- 渲染：代码块 puppeteer 兜底（CJK 安全，freeze 缺字体时的保真通道）----
-function codeHtml(code, lang) {
+// title 为「代码块 N」标题（与 gist 文档里的标题一致，读者按标题对照复制）。
+function codeHtml(code, lang, title) {
+  const bar = title ? (lang ? `${title} · ${lang}` : title) : lang;
   return `<!doctype html><html><head><meta charset="utf-8"><style>
   *{box-sizing:border-box;}
   body{margin:0;background:#0d1117;padding:22px 26px;font-family:'SF Mono',Menlo,Consolas,'PingFang SC','Microsoft YaHei',monospace;color:#c9d1d9;display:inline-block;}
-  .bar{color:#8b949e;font-size:12px;margin-bottom:10px;font-family:-apple-system,'PingFang SC',sans-serif;letter-spacing:.04em;}
+  .bar{color:#8b949e;font-size:13px;margin-bottom:10px;font-family:-apple-system,'PingFang SC',sans-serif;letter-spacing:.04em;}
   pre{margin:0;white-space:pre;font-size:15px;line-height:1.6;tab-size:2;}
   </style></head><body>
-  ${lang ? `<div class="bar">${escapeHtml(lang)}</div>` : ''}
+  ${bar ? `<div class="bar">${escapeHtml(bar)}</div>` : ''}
   <pre>${escapeHtml(code)}</pre></body></html>`;
+}
+
+// freeze 出的彩色 PNG 复合一条同款标题栏（freeze 自身不支持标题；标题栏底色与
+// freeze --background 一致，视觉上连成一张图）。字号在实测 freeze 输出缩放后标定。
+async function wrapPngWithTitle(png, title) {
+  const w = png.readUInt32BE(16); // PNG IHDR：宽高在固定偏移
+  const html = `<!doctype html><html><head><meta charset="utf-8"><style>
+  *{box-sizing:border-box;}
+  body{margin:0;background:#0d1117;display:inline-block;}
+  .bar{color:#8b949e;font-family:-apple-system,'PingFang SC',sans-serif;letter-spacing:.04em;
+       padding:20px 0 2px 30px;font-size:24px;}
+  img{display:block;width:${w}px;}
+  </style></head><body>
+  <div class="bar">${escapeHtml(title)}</div>
+  <img src="data:image/png;base64,${png.toString('base64')}"></body></html>`;
+  return renderHtmlToPng(html, w, 1);
 }
 
 // ---- 渲染：表格（深色 GitHub 风，与海报视觉统一）----
@@ -208,16 +226,16 @@ function tableHtml(header, data) {
   </style></head><body>${`<table><thead><tr>${thead}</tr></thead><tbody>${tbody}</tbody></table>`}</body></html>`;
 }
 
-async function renderHtmlToPng(html, minWidth) {
+async function renderHtmlToPng(html, minWidth, deviceScaleFactor = 2) {
   const browser = await launchBrowser();
   try {
     const page = await browser.newPage();
-    await page.setViewport({ width: minWidth, height: 10, deviceScaleFactor: 2 });
+    await page.setViewport({ width: minWidth, height: 10, deviceScaleFactor });
     await page.setContent(html, { waitUntil: 'networkidle0' });
     // 内容比视口宽时（长代码行/宽表格）按实际宽度重设，避免截断
     const w = await page.evaluate(() => Math.ceil(document.body.scrollWidth) + 1);
     if (w > minWidth) {
-      await page.setViewport({ width: Math.min(w, 1800), height: 10, deviceScaleFactor: 2 });
+      await page.setViewport({ width: Math.min(w, deviceScaleFactor === 1 ? 3600 : 1800), height: 10, deviceScaleFactor });
     }
     const el = await page.$('body');
     return await el.screenshot({ type: 'png' });
@@ -304,19 +322,21 @@ export async function transformMarkdownBody(mdBody, {
     ci++;
     const name = `${base}-code-${ci}.png`;
     const p = path.join(bedDir, name);
+    // 图上标题与 gist 文档标题同源（「代码块 N」），读者按标题在 gist 里对照复制
+    const label = gistDocHeading(ci);
     let rendered = false;
     if (freezeBin && !hasCJK(b.code)) {
       try {
         renderCodeWithFreeze(freezeBin, b.code, b.lang, p);
+        fs.writeFileSync(p, await wrapPngWithTitle(fs.readFileSync(p), b.lang ? `${label} · ${b.lang}` : label));
         rendered = true;
       } catch {} // freeze 失败（未知语言等）静默退回 puppeteer
     }
     if (!rendered) {
-      fs.writeFileSync(p, await renderHtmlToPng(codeHtml(b.code, b.lang), 920));
+      fs.writeFileSync(p, await renderHtmlToPng(codeHtml(b.code, b.lang, label), 920));
     }
-    const gistName = gistFileName(ci, b.lang);
     const copyUrl = codeCopyBaseUrl
-      ? `${codeCopyBaseUrl.replace(/#.*$/, '')}#${gistFileAnchor(gistName)}`
+      ? `${codeCopyBaseUrl.replace(/#.*$/, '')}#${gistDocAnchor(ci)}`
       : null;
     assets.push({
       kind: 'code',
@@ -324,6 +344,7 @@ export async function transformMarkdownBody(mdBody, {
       url: urlBase + encodeURIComponent(name),
       localPath: p,
       copyUrl,
+      label,
     });
     stats.codeImg++;
   }
@@ -350,8 +371,8 @@ export async function transformMarkdownBody(mdBody, {
   let out = text;
   for (const r of replacements) out = out.split(r.id).join(r.text);
   for (const a of assets) {
-    const alt = a.kind === 'code' ? '代码块' : '表格';
-    const copyLink = a.copyUrl ? `\n\n[复制这段代码](${a.copyUrl})` : '';
+    const alt = a.kind === 'code' ? (a.label || '代码块') : '表格';
+    const copyLink = a.copyUrl ? `\n\n[复制 ${a.label}](${a.copyUrl})` : '';
     out = out.split(a.id).join(`![${alt}](${a.url})${copyLink}`);
   }
   out = out.replace(/\n{3,}/g, '\n\n'); // 占位符前后补的换行会产生连续空行，收敛成一个
