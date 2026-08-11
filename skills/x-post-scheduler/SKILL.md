@@ -1,6 +1,6 @@
 ---
 name: x-post-scheduler
-description: 把资讯文章链接变成 X (Twitter) 帖子并通过 Buffer 发布/排期：抓取原文 → 自主选风格写中文摘要短评（单版本）→ 生成海报（可选）→ 发布前人工确认（可在本文件内开启全自动）→ 立即发布或按用户指定时间排期 → 原文链接放首条评论。另含长文支线：用户说「发长文」「排期 Article」时经 Typefully 发布 X Article。当用户给出文章链接（AI / 编程资讯为主）并希望发到 X 时使用本 skill——即使只丢一个链接不带说明，也应触发流程（默认会在发布前请用户确认）。一次给多个链接时，逐篇独立走完整流程。注意：提示词带「深度」二字（「深度读一下」「这篇走深度」）时不走本流水线，改用 deep-read skill（互动式深读 → 讨论校准 → 读后感/线程）。
+description: 把资讯文章链接变成 X (Twitter) 帖子并通过 Buffer 发布/排期：抓取原文 → 自主选风格写中文摘要短评（单版本）→ 生成海报（可选）→ 发布前人工确认（可在本文件内开启全自动）→ 立即发布或按用户指定时间排期 → 原文链接放首条评论。另含长文支线：用户说「发长文」「排期 Article」时经 Typefully 发布 X Article（Typefully 亦可作短推/推串排期的备选通道）。当用户给出文章链接（AI / 编程资讯为主）并希望发到 X 时使用本 skill——即使只丢一个链接不带说明，也应触发流程（默认会在发布前请用户确认）。一次给多个链接时，逐篇独立走完整流程。注意：提示词带「深度」二字（「深度读一下」「这篇走深度」）时不走本流水线，改用 deep-read skill（互动式深读 → 讨论校准 → 读后感/线程）。
 ---
 
 # x-post-scheduler：资讯 → 摘要短评 + 海报 → Buffer 发布/排期
@@ -164,7 +164,7 @@ node .claude/skills/x-post-scheduler/scripts/buffer-post.mjs \
   [--due-at "2026-07-11T08:00:00+08:00"]
 ```
 
-   token 自动从环境变量 `BUFFER_TOKEN`、`~/.config/buffer/key` 或 `~/.claude.json` 读取；频道未配置时自动发现（恰好一个 X 频道时）。都解析不到才停下来请用户配置。
+   token 自动从环境变量 `BUFFER_TOKEN`、`~/.config/buffer/key` 或 `~/.claude.json` 读取；频道未配置时自动发现（恰好一个 X 频道时）。都解析不到才停下来请用户配置；Buffer 整条通道不可用（无 token / 免费版排期额度满）时，可改走 Typefully 短推通道（见附录），发布决策规则不变。
 2. 时间换算：用户用自然语言说时间（「明晚 8 点」「周五中午」），按**用户本地时区**换算成带偏移的 ISO 时间；先用 `date` 命令确认当前真实日期再算，不要凭感觉推。Buffer `get_account` 返回的 `currentTime` 可直接做锚点。
 3. 有配图时，上传海报图到图床仓库（`<assets_dir>` 为配置的图床本地克隆；自动模式下在海报目检通过后即可执行，人工确认/红线情形则等用户确认后再推）：
 
@@ -191,9 +191,9 @@ cp <PNG路径> <assets_dir>/<日期-slug>.png \
 原文：https://example.com/article
 ```
 
-## 附：长文发布（X Article，走 Typefully）
+## 附：Typefully 通道（长文 X Article + 短推备选）
 
-短推走 Buffer；**长文 Article（标题 + 富文本 + 封面的文章格式）Buffer 做不了，走 Typefully API**（实测全链路可用；X 原生也不支持 Article 排期，Typefully 是目前的 API 通道）。触发场景：用户说「发长文」「排期这篇 Article」「把这篇 Markdown 发到 X」等。
+短推默认走 Buffer；**长文 Article（标题 + 富文本 + 封面的文章格式）Buffer 做不了，走 Typefully API**（实测全链路可用；X 原生也不支持 Article 排期，Typefully 是目前的 API 通道）。触发场景：用户说「发长文」「排期这篇 Article」「把这篇 Markdown 发到 X」等。`typefully-post.mjs` 同时支持短推/推串（见本节末尾），作为 Buffer 的备选排期通道。
 
 ```bash
 # 连通检查
@@ -240,6 +240,26 @@ node .claude/skills/x-post-scheduler/scripts/md-assets.mjs --test 文章.md
 ```
 
 - 实测坑：node 里 `execFileSync` 调 freeze 时 stdin 必须给 `ignore`——给 `pipe` 的话 freeze 会认为输入来自 stdin，忽略文件参数报 "No input"（脚本内已处理，改脚本时别动这行）
+
+### Typefully 短推/推串（Buffer 的备选排期通道）
+
+`typefully-post.mjs` 也能发短推/推串（`platforms.x`）。短推默认仍走 Buffer，以下情形改走这条通道：Buffer 不可用或免费版排期额度满（10 条）、配图不想经 GitHub 图床（Typefully 本地文件直传，没有「排期帖没发出前图床图不能删」的约束）、或想用 `next-free-slot` 排进 Typefully 队列的下一个空档。
+
+```bash
+# 单条短推（--image 为本地文件路径，可重复、均挂首条，X 单推上限 4 张；无需图床）
+node .claude/skills/x-post-scheduler/scripts/typefully-post.mjs \
+  --text-file /tmp/tweet.txt \
+  [--image 海报.png] [--first-comment "原文：<URL>"] \
+  [--publish-at "2026-07-16T08:00:00+08:00" | --publish-at now | --publish-at next-free-slot]
+# 推串：与 buffer-post.mjs 同格式（各条之间用单独一行 --- 分隔），--first-comment 追加为最后一条
+node .claude/skills/x-post-scheduler/scripts/typefully-post.mjs --thread-file /tmp/thread.txt [同上可选参数]
+# 发前自检：--dry-run 打印分条与每条加权字数（口径同 buffer-post.mjs），不联网、不建草稿
+node .claude/skills/x-post-scheduler/scripts/typefully-post.mjs --thread-file /tmp/thread.txt --dry-run
+```
+
+- **第 4 步发布决策与红线回退同样适用本通道**：换通道不改确认规则，自动发布授权对两条短推通道一体生效
+- 不带 `--publish-at` 仅存草稿（打印 `private_url` 预览链接）；`now` 的处理与 Article 相同（脚本转近未来 ISO 再排期）
+- 已验证的 API 事实（实测）：短推走 `platforms.x`，`enabled: true` 必填、`posts[]` 每项一条推文（上限 50 条）；**配图挂在 `posts[].media_ids`**（每条上限 10，X 实际单推上限 4 张图），媒体上传与 Article 共用一条通道（ASCII 文件名约束同样适用）；`x_article` 平台是 standalone、**不能与 `x` 平台混在同一草稿**（脚本因此把 `--markdown-file` 与 `--text-file/--thread-file` 设计为互斥）；Typefully 媒体上传**没有 alt 文本字段**（配图需要无障碍描述时用 Buffer 通道的 `--alt`）；短推发布后的链接字段是 `x_published_url`（脚本轮询时已打印）
 
 ## 附：已验证的 Buffer API 事实（实测，供排错参考）
 

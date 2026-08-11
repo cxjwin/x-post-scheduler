@@ -1,6 +1,9 @@
 #!/usr/bin/env node
-// Typefully 长文发布脚本：通过 API v2 创建/排期 X Article（也可用于普通草稿检查）。
-// 零依赖，任何有 node 的环境可用。与 buffer-post.mjs 互补：短推走 Buffer，长文 Article 走这里。
+// Typefully 发布脚本：通过 API v2 创建/排期 X 内容，两种模式：
+//   长文 X Article（--markdown-file，platforms.x_article）和短推/推串（--text-file / --thread-file，platforms.x）。
+// 零依赖，任何有 node 的环境可用。短推排期与 buffer-post.mjs 互为备选通道：
+//   Buffer 要求配图是公网 URL（走 GitHub 图床）；Typefully 本地图直传（media/upload），
+//   且 --publish-at next-free-slot 可排进 Typefully 队列的下一个空档。
 //
 // 用法：
 //   node typefully-post.mjs --check
@@ -11,6 +14,15 @@
 //       [--no-transform] [--no-gist | --gist-url <已有 gist URL>]
 //       创建 X Article：正文为 Markdown，文章标题自动取自首个 # 一级标题。
 //       不带 --publish-at 时仅存为草稿（可在 Typefully 里预览后再排期）。
+//   node typefully-post.mjs --text-file tweet.txt \
+//       [--image /path/img.png（可重复，均挂首条，X 单推上限 4 张）] \
+//       [--first-comment "原文：https://..."] [--publish-at 同上] [--draft-title ...] [--social-set <id>]
+//       发单条短推。配图为本地文件路径，直传 Typefully，不经 GitHub 图床。
+//   node typefully-post.mjs --thread-file thread.txt [同上可选参数]
+//       发推串：文件内各条推文之间用「单独一行 ---」分隔（与 buffer-post.mjs 同格式），
+//       --first-comment 追加为最后一条。与 --text-file 互斥。
+//   短推模式加 --dry-run：只打印分条结果和每条的 X 计数字符估算（口径同 buffer-post.mjs），
+//       不做任何网络请求、不建草稿。
 //
 // token 来源（按序）：环境变量 TYPEFULLY_KEY → ~/.config/typefully/key 文件。
 // social set 来源（按序）：--social-set → 配置（XPS_TYPEFULLY_SOCIAL_SET / config.json 的
@@ -39,6 +51,11 @@ function parseArgs(argv) {
     const k = argv[i];
     if (k === '--check') a.check = true;
     else if (k === '--markdown-file') a.mdFile = argv[++i];
+    else if (k === '--text-file') a.textFile = argv[++i];
+    else if (k === '--thread-file') a.threadFile = argv[++i];
+    else if (k === '--image') (a.images ??= []).push(argv[++i]);
+    else if (k === '--first-comment') a.firstComment = argv[++i];
+    else if (k === '--dry-run') a.dryRun = true;
     else if (k === '--publish-at') a.publishAt = argv[++i];
     else if (k === '--cover') a.cover = argv[++i];
     else if (k === '--draft-title') a.draftTitle = argv[++i];
@@ -112,7 +129,97 @@ async function resolveSocialSet(token, cfg, arg) {
   process.exit(1);
 }
 
+// X 计数字符估算（与 buffer-post.mjs 的 xWeight 保持同一口径，改动请两边同步）：
+// URL 记 23；twitter-text v3 权重 1 的区间（基本拉丁等）记 1，其余（含 CJK；emoji 按码点会略高估）记 2。
+function xWeight(s) {
+  let n = 0;
+  const rest = s.replace(/https?:\/\/\S+/g, () => { n += 23; return ''; });
+  for (const ch of rest) {
+    const c = ch.codePointAt(0);
+    n += (c <= 0x10ff || (c >= 0x2000 && c <= 0x200d) || (c >= 0x2010 && c <= 0x201f) || (c >= 0x2032 && c <= 0x2037)) ? 1 : 2;
+  }
+  return n;
+}
+
+// 创建草稿并打印结果（长文/短推两种模式共用）。
+// publish_at 用 rawPublishAt 在这里最后一刻处理：不用 "now" 字符串——生产验证过它会被静默当
+// 草稿存下（官方 spec 后来注明 "now" 是异步发布、status 短暂停留在 draft，需另查 publish_state），
+// 转成近未来 ISO 走排期路径最稳；且必须在所有慢操作（排版转图、媒体上传）之后才计算，
+// 否则时间戳可能已成过去时。明确的 ISO 时间 / next-free-slot 原样传。
+async function createDraftAndReport(token, socialSet, payload, rawPublishAt, { titleFallback } = {}) {
+  const wantNow = rawPublishAt === 'now';
+  const publishAt = wantNow ? new Date(Date.now() + 30000).toISOString() : rawPublishAt;
+  if (publishAt) payload.publish_at = publishAt;
+
+  const draft = await api('POST', `/v2/social-sets/${socialSet}/drafts`, token, payload);
+  const draftId = draft.draft_id || draft.id;
+  console.log(`结果：status=${draft.status} draft_id=${draftId}`);
+  if (draft.draft_title || titleFallback) console.log(`标题：${draft.draft_title || titleFallback}`);
+  if (draft.private_url) console.log(`预览链接：${draft.private_url}`);
+
+  // 发布后回读真实状态：创建响应里的 status 是瞬时值（publish_at 生效后其实可能已 published，
+  // 但响应仍显示 draft），有 publish_at 时轮询 GET 确认最终状态并取发布链接。
+  if (!publishAt) return;
+  for (let i = 0; i < 30; i++) {
+    const d = await api('GET', `/v2/social-sets/${socialSet}/drafts/${draftId}`, token);
+    if (d.status === 'published') {
+      console.log(`已发布：${d.x_article_published_url || d.x_published_url || '(X 链接稍后生成)'}`);
+      break;
+    }
+    if (d.status === 'scheduled' && !wantNow) {
+      console.log(`已排期：${d.scheduled_date}（到点自动发布）`);
+      break;
+    }
+    await new Promise((r) => setTimeout(r, 3000));
+  }
+}
+
 const a = parseArgs(process.argv.slice(2));
+
+// 模式互斥：x_article 平台是 standalone（API 不允许与 x 平台同草稿混用），长文/短推二选一；
+// 各模式专属旗标误用时明确报错，避免静默忽略造成意外。
+const tweetMode = Boolean(a.textFile || a.threadFile);
+if (a.textFile && a.threadFile) {
+  console.error('错误：--text-file 与 --thread-file 只能二选一。');
+  process.exit(1);
+}
+if (a.mdFile && tweetMode) {
+  console.error('错误：--markdown-file（长文）与 --text-file/--thread-file（短推）只能二选一。');
+  process.exit(1);
+}
+if (tweetMode && (a.cover || a.noTransform || a.noGist || a.gistUrl)) {
+  console.error('错误：--cover/--no-transform/--no-gist/--gist-url 仅用于长文模式；短推配图请用 --image <本地图片路径>。');
+  process.exit(1);
+}
+if (!tweetMode && (a.images || a.firstComment || a.dryRun)) {
+  console.error('错误：--image/--first-comment/--dry-run 仅用于短推模式（--text-file/--thread-file）；长文排版自检请用 md-assets.mjs --test。');
+  process.exit(1);
+}
+
+// 短推分条：--thread-file 按「单独一行 ---」分隔为多条；--text-file 整个文件为单条（与 buffer-post.mjs 同约定）。
+const segments = a.threadFile
+  ? readFileSync(a.threadFile, 'utf8').split(/^[ \t]*-{3,}[ \t]*\r?$/m).map((s) => s.trim()).filter(Boolean)
+  : a.textFile ? [readFileSync(a.textFile, 'utf8').trim()].filter(Boolean) : [];
+
+if (tweetMode && !segments.length) {
+  console.error(a.threadFile
+    ? '错误：--thread-file 内容为空（各条之间用单独一行 --- 分隔）。'
+    : '错误：--text-file 内容为空。');
+  process.exit(1);
+}
+
+// dry-run 在读 token 之前退出：不需要任何凭据、不做任何网络请求。
+if (a.dryRun) {
+  segments.forEach((s, i) => {
+    const w = xWeight(s);
+    console.log(`--- [${i + 1}/${segments.length}] 计数字符 ≈ ${w}${w > 280 ? '（超 280：免费档发不出；Premium+ 可发但时间线折叠）' : ''} ---`);
+    console.log(s);
+  });
+  if (a.firstComment) console.log(`--- [首评] 计数字符 ≈ ${xWeight(a.firstComment)} ---\n${a.firstComment}`);
+  if (a.images) console.log(`--- [配图] ${a.images.length} 张，挂首条：${a.images.join('，')} ---`);
+  process.exit(0);
+}
+
 const token = getToken();
 const cfg = loadConfig();
 
@@ -121,12 +228,36 @@ if (a.check) {
   process.exit(0);
 }
 
-if (!a.mdFile) {
-  console.error('错误：缺少 --markdown-file（或使用 --check 做连通性检查）。');
+if (!a.mdFile && !tweetMode) {
+  console.error('错误：缺少 --markdown-file（长文）或 --text-file/--thread-file（短推）。也可用 --check 做连通性检查。');
   process.exit(1);
 }
 
 const socialSet = await resolveSocialSet(token, cfg, a.socialSet);
+
+// —— 短推/推串模式：platforms.x（enabled 必填，posts 每项一条推文、上限 50 条）——
+// 配图挂在 posts[].media_ids（每条上限 10，X 实际单推上限 4 张图）；本地文件直传 Typefully，
+// 不经 GitHub 图床。注意：Typefully 媒体上传接口没有 alt 文本字段（Buffer 通道才支持 alt）。
+if (tweetMode) {
+  const mediaIds = [];
+  for (const [i, img] of (a.images || []).entries()) {
+    mediaIds.push(await uploadMedia(token, socialSet, img, `post-media-${i + 1}`));
+  }
+  if (mediaIds.length > 4) console.error(`警告：X 单条推文最多 4 张图，当前 ${mediaIds.length} 张，发布可能失败。`);
+  if (mediaIds.length) console.log(`配图已上传：${mediaIds.length} 张（挂首条）`);
+
+  const posts = segments.map((t, i) => (i === 0 && mediaIds.length ? { text: t, media_ids: mediaIds } : { text: t }));
+  if (a.firstComment) posts.push({ text: a.firstComment });
+
+  const payload = {
+    ...(a.draftTitle ? { draft_title: a.draftTitle } : {}),
+    platforms: { x: { enabled: true, posts } },
+  };
+  await createDraftAndReport(token, socialSet, payload, a.publishAt);
+  process.exit(0);
+}
+
+// —— 长文 X Article 模式 ——
 
 let md = readFileSync(a.mdFile, 'utf8').trim();
 // 去掉开头的 YAML frontmatter（--- ... ---）：X Article 要求正文首块必须是 H1，
@@ -198,18 +329,11 @@ if (a.cover) {
   console.log(`封面已上传：media_id=${coverMediaId}`);
 }
 
-// publish_at：Typefully 不接受 "now" 字符串（会被静默当草稿存下、不发布），
-// 转成近未来 ISO 触发立即发布；明确的 ISO 时间 / next-free-slot 原样传。
-let publishAt = a.publishAt;
-const wantNow = publishAt === 'now';
-if (wantNow) publishAt = new Date(Date.now() + 30000).toISOString();
-
 // 创建 X Article（长文）：正文和封面都必须嵌套在 platforms.x_article 下。
 // Typefully 要求 platforms 为必填字段，content_markdown 和 cover_media_id 在顶层会被拒绝（422 extra_forbidden）。
 // 注意：文章标题自动取自正文首个 H1，x_article 下没有 title 字段（传了报 422）。
 const payload = {
   ...(a.draftTitle ? { draft_title: a.draftTitle } : {}),
-  ...(publishAt ? { publish_at: publishAt } : {}),
   platforms: {
     x_article: {
       content_markdown: md,
@@ -218,25 +342,4 @@ const payload = {
   },
 };
 
-const draft = await api('POST', `/v2/social-sets/${socialSet}/drafts`, token, payload);
-const draftId = draft.draft_id || draft.id;
-console.log(`结果：status=${draft.status} draft_id=${draftId}`);
-console.log(`标题：${draft.draft_title || '(取自 H1)'}`);
-if (draft.private_url) console.log(`预览链接：${draft.private_url}`);
-
-// 发布后回读真实状态：创建响应里的 status 是瞬时值（publish_at 生效后其实可能已 published，
-// 但响应仍显示 draft），有 publish_at 时轮询 GET 确认最终状态并取 X 文章链接。
-if (publishAt) {
-  for (let i = 0; i < 30; i++) {
-    const d = await api('GET', `/v2/social-sets/${socialSet}/drafts/${draftId}`, token);
-    if (d.status === 'published') {
-      console.log(`已发布：${d.x_article_published_url || d.x_published_url || '(X 链接稍后生成)'}`);
-      break;
-    }
-    if (d.status === 'scheduled' && !wantNow) {
-      console.log(`已排期：${d.scheduled_date}（到点自动发布）`);
-      break;
-    }
-    await new Promise((r) => setTimeout(r, 3000));
-  }
-}
+await createDraftAndReport(token, socialSet, payload, a.publishAt, { titleFallback: '(取自 H1)' });

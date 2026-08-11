@@ -4,13 +4,13 @@
 
 ![AI 海报示例：Codex gpt-image-2 生成底图 + Pillow 叠字，中文 100% 准确](docs/example-poster.png)
 
-> **English**: A Claude Code skill suite that turns content into X (Twitter) posts. Drop an article link and the agent fetches it, writes a commentary-style summary in your voice, generates a themed poster (optional, via Codex `gpt-image-2` or a Puppeteer HTML template), and publishes/schedules through Buffer — with the source link as the first reply. Also includes an original-meme skill, an interactive deep-reading mode (full-text read → viewpoint discussion & calibration with you → reflection post or thread), and long-form X Article publishing via Typefully (with automatic Markdown→X-flavor preprocessing: code blocks → syntax-highlighted images, tables → lists or images). Docs below are in Chinese; the scripts are zero-dependency Node and self-documenting.
+> **English**: A Claude Code skill suite that turns content into X (Twitter) posts. Drop an article link and the agent fetches it, writes a commentary-style summary in your voice, generates a themed poster (optional, via Codex `gpt-image-2` or a Puppeteer HTML template), and publishes/schedules through Buffer — with the source link as the first reply. Also includes an original-meme skill, an interactive deep-reading mode (full-text read → viewpoint discussion & calibration with you → reflection post or thread), and long-form X Article publishing via Typefully (with automatic Markdown→X-flavor preprocessing: code blocks → syntax-highlighted images, tables → lists or images; Typefully also doubles as an alternative channel for scheduling regular posts/threads, with local media upload — no image-hosting repo needed). Docs below are in Chinese; the scripts are zero-dependency Node and self-documenting.
 
 ## 四大功能
 
 | 功能 | 入口 | 配图 | 发布通道 | 确认策略 |
 |------|------|------|---------|---------|
-| **资讯短推** | 丢一个文章链接 | 海报（可选：AI 生成 / HTML 模板 / 不配图） | Buffer | 默认发布前确认，可开全自动 |
+| **资讯短推** | 丢一个文章链接 | 海报（可选：AI 生成 / HTML 模板 / 不配图） | Buffer（备选 Typefully，图免图床直传） | 默认发布前确认，可开全自动 |
 | **深度读后感/线程** | 链接 + 提示词带「深度」 | 默认不配图 | Buffer（长推/线程），超长可走 Typefully | 全程讨论校准，必须人工确认（不适用自动授权） |
 | **段子短推** | 「来条段子」「这个帖子二创一下」 | 原帖有图才二创配图（可选） | Buffer | 必须人工挑选（不适用自动授权） |
 | **长文 Article** | 「发长文」「把这篇 Markdown 排期成 Article」 | 封面（可选） | Typefully | 先建草稿给预览链接，确认后排期 |
@@ -47,7 +47,7 @@
 | GitHub 公开仓库 ×1 | 短推配图图床（Buffer 只收公开 URL，不能传本地文件；**长文 Article 正文图走 Typefully 媒体，不用图床**） | 短推配图时 |
 | [Codex CLI](https://github.com/openai/codex) | AI 海报（`gpt-image-2` 生底图 + Pillow 叠字，中文 100% 准确） | 可选 |
 | Puppeteer Core + 系统浏览器 | HTML 模板海报兜底、代码块/表格转图；复用已安装的 Chrome/Edge/Chromium，不另下载浏览器 | **发带代码/表格的长文必需**（`cd skills/x-post-scheduler/scripts && npm install`）；纯短推可省 |
-| [Typefully](https://typefully.com) 账号 + API key | 长文 X Article 排期（X 原生不支持 Article 排期） | 可选（长文） |
+| [Typefully](https://typefully.com) 账号 + API key | 长文 X Article 排期（X 原生不支持 Article 排期）；也可发短推/推串，作为 Buffer 的备选通道（配图本地直传，免图床） | 可选（长文/短推备选） |
 | [freeze](https://github.com/charmbracelet/freeze) | 代码块语法高亮图（`brew install charmbracelet/tap/freeze`） | 可选（缺了走 Puppeteer 兜底） |
 | [GitHub CLI](https://cli.github.com/) 或带 Gist 权限的 token | 为 Article 的代码图生成可复制源码链接（一篇文章一个 secret Gist） | 可选（失败只警告，不阻塞发文） |
 
@@ -109,7 +109,7 @@ git clone https://github.com/<you>/post-assets.git
 
 ```bash
 node skills/x-post-scheduler/scripts/buffer-post.mjs --check
-node skills/x-post-scheduler/scripts/typefully-post.mjs --check   # 用长文功能才需要
+node skills/x-post-scheduler/scripts/typefully-post.mjs --check   # 用长文或 Typefully 短推通道才需要
 node skills/x-post-scheduler/scripts/gist.mjs --check             # Article 代码复制链接
 ```
 
@@ -141,6 +141,7 @@ https://example.com/some-article 深度读一下   ← deep-read skill：总结+
 - **freeze 的 stdin 必须接 `/dev/null`**——给 pipe 它会忽略文件参数报 "No input"（脚本内已处理）。
 - **Typefully `media/upload` 的 `file_name` 必须是 ASCII**——中文文件名会 422（校验 `^[a-zA-Z0-9_.()\-]+\.ext$`），脚本已用 `code-1.png` 这类 ASCII 名上传，与本地中文 slug 解耦。
 - **`--publish-at now` 别直传给 Typefully**——它不认 "now" 字符串（会被静默当草稿存下、不发布），脚本已改成转近未来 ISO；且发布后要回读 `GET drafts/{id}` 确认真实状态（创建响应的 `status` 是瞬时值，可能显示 draft 但其实已 published）。
+- **Typefully 短推配图挂在 `posts[].media_ids`，不在草稿顶层**——顶层没有 `media` 字段（schema 是 `additionalProperties: false`，多传会 422）；`x_article` 是 standalone 平台，**不能与 `x` 平台混在同一草稿**（脚本已把长文/短推做成互斥模式）；Typefully 媒体上传没有 alt 文本字段，配图需要无障碍描述时用 Buffer 通道的 `--alt`。
 
 ## 目录结构
 
@@ -151,7 +152,7 @@ skills/
 │   ├── scripts/
 │   │   ├── config.mjs       # 配置加载（config.json + 环境变量 + 自动发现）
 │   │   ├── buffer-post.mjs  # Buffer 发布（零依赖，直连 MCP 端点；--thread-file 发线程，--dry-run 自检字数）
-│   │   ├── typefully-post.mjs # Typefully 长文 Article
+│   │   ├── typefully-post.mjs # Typefully 长文 Article + 短推/推串（--text-file/--thread-file，--dry-run 自检字数）
 │   │   ├── md-assets.mjs    # Markdown → X 化排版预处理
 │   │   ├── gist.mjs         # Article 代码块 → 单个多文件 Gist（可复制源码）
 │   │   ├── browser.mjs      # 复用系统 Chrome/Edge/Chromium
