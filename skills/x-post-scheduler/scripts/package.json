@@ -1,8 +1,9 @@
 {
   "name": "x-post-scheduler-scripts",
   "private": true,
-  "description": "Scripts for the x-post-scheduler Claude Code skill. buffer-post.mjs / typefully-post.mjs use built-in Node APIs; puppeteer-core drives an installed system browser for poster and code/table rendering.",
+  "description": "Scripts for the x-post-scheduler Claude Code skill. buffer-post.mjs / typefully-post.mjs are zero-dependency; puppeteer-core (reusing the system Chrome, no Chromium download) + shiki are only needed for the HTML poster fallback (render.js) and code/table image rendering (md-assets.mjs).",
   "dependencies": {
-    "puppeteer-core": "^24.43.1"
+    "puppeteer-core": "^24.43.1",
+    "shiki": "^3.0.0"
   }
 }

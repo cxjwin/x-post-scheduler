@@ -25,8 +25,8 @@
          ─→ Buffer 发布/排期（原文链接放首条评论）
          ─→ 发布后报告（推文链接 / 排期时间，回「删掉」即撤）
 
-长文 Markdown ─→ X 化排版（代码块→高亮图 + Gist 复制链接，表格→列表/图，行内码→「」）
-             ─→ Typefully 草稿（标题取 H1，可传封面）─→ 预览确认 ─→ 排期
+长文 Markdown ─→ X 化排版（代码块→shiki 高亮图带「代码块 N」标题 + 同标题 Gist，表格→列表/图，行内码→「」）
+             ─→ Typefully 草稿（标题取 H1，可传封面）─→ 预览确认 ─→ 排期 ─→ 首评补 Gist 链接
 
 链接 +「深度」─→ 细读全文 ─→ 总结 + 观点讨论底稿 ─→ 与你多轮讨论、校准立场
             ─→ 读后感长推 / 3~7 条线程（每条自动算计数字符）─→ 确认后 Buffer 发布/排期
@@ -46,9 +46,8 @@
 | [Buffer](https://buffer.com) 账号 + API key | 短推发布/排期（免费版够用：3 频道 / 10 条排期） | ✅（短推） |
 | GitHub 公开仓库 ×1 | 短推配图图床（Buffer 只收公开 URL，不能传本地文件；**长文 Article 正文图走 Typefully 媒体，不用图床**） | 短推配图时 |
 | [Codex CLI](https://github.com/openai/codex) | AI 海报（`gpt-image-2` 生底图 + Pillow 叠字，中文 100% 准确） | 可选 |
-| Puppeteer Core + 系统浏览器 | HTML 模板海报兜底、代码块/表格转图；复用已安装的 Chrome/Edge/Chromium，不另下载浏览器 | **发带代码/表格的长文必需**（`cd skills/x-post-scheduler/scripts && npm install`）；纯短推可省 |
+| Puppeteer Core + shiki + 系统浏览器 | HTML 模板海报兜底、代码块（shiki 全彩高亮，中文注释不豆腐）/表格转图；复用已安装的 Chrome/Edge/Chromium，不另下载浏览器 | **发带代码/表格的长文必需**（`cd skills/x-post-scheduler/scripts && npm install`）；纯短推可省 |
 | [Typefully](https://typefully.com) 账号 + API key | 长文 X Article 排期（X 原生不支持 Article 排期）；也可发短推/推串，作为 Buffer 的备选通道（配图本地直传，免图床） | 可选（长文/短推备选） |
-| [freeze](https://github.com/charmbracelet/freeze) | 代码块语法高亮图（`brew install charmbracelet/tap/freeze`） | 可选（缺了走 Puppeteer 兜底） |
 | [GitHub CLI](https://cli.github.com/) 或带 Gist 权限的 token | 为 Article 的代码图生成可复制源码链接（一篇文章一个 secret Gist） | 可选（失败只警告，不阻塞发文） |
 
 发 Article 需要 X 账号有 Premium；长推不限字数需要 Premium+（免费账号 skill 会按 280 计数字符控制篇幅）。
@@ -121,6 +120,7 @@ node skills/x-post-scheduler/scripts/gist.mjs --check             # Article 代�
 https://example.com/some-article            ← 丢链接，走完整流程，发布前给你确认
 https://example.com/some-article 明早 8 点发  ← 指定时间则排期
 这篇暖心一点 / 毒舌一点 / 不配图            ← 风格和配图都可以指定
+这篇拆成线程发                               ← 多条接龙推文，编号自动拆分，一次排期整串
 https://example.com/some-article 深度读一下   ← deep-read skill：总结+观点→讨论校准→读后感/线程
 来条段子 / 看看今天有什么梗                  ← meme-post skill
 把这篇 Markdown 发成长文 Article，周五中午    ← Typefully 长文支线
@@ -135,10 +135,10 @@ https://example.com/some-article 深度读一下   ← deep-read skill：总结+
 
 - **GitHub raw 返回 429 不用等**——那是对你本机 curl 的限流，Buffer 服务器从自己的 IP 取图不受影响，push 成功就直接发。
 - **海报要点符号用「•」别用「▸」**——中文字体缺 ▸ 字形，会渲染成豆腐块。
-- **X Article 的 Markdown 子集很小，正文图还必须走 Typefully 媒体**——代码块降级成引用、表格不渲染、行内反引号原样显示，而且**外链 markdown 图 `![](url)` 不会内嵌、只显示成链接文本**（实测踩过）。`md-assets.mjs` + `typefully-post.mjs` 自动分流：多行代码/大表格→图片并**上传 Typefully、用 `<typ:media>` 标签嵌入**（不走 github 图床）；**每张代码图带「代码块 N」标题栏**，全文代码汇总成一个 secret Gist（单 markdown 文档，同款「## 代码块 N」标题，每块自带复制按钮），图下深链按标题锚点直达对应块；小表格→列表、行内码→「」、H3+→加粗行。Gist 认证不可用时只跳过复制链接，不阻塞 Article。
+- **X Article 的 Markdown 子集很小，正文图还必须走 Typefully 媒体**——代码块降级成引用、表格不渲染、行内反引号原样显示，而且**外链 markdown 图 `![](url)` 不会内嵌、只显示成链接文本**（实测踩过）。`md-assets.mjs` + `typefully-post.mjs` 自动分流：多行代码/大表格→图片并**上传 Typefully、用 `<typ:media>` 标签嵌入**（不走 github 图床）；**每张代码图带「代码块 N」标题栏**（shiki 全彩高亮，中文注释同样有色），全文代码汇总成一个 secret Gist（单 markdown 文档，同款「## 代码块 N」标题，每块自带复制按钮）；gist 链接默认**不进正文**、走发布后手动首评（保护推荐分发，`--gist-links body` 可改成图下标题锚点深链）；小表格→列表、行内码→「」、H3+→加粗行。Gist 认证不可用时只跳过复制通道，不阻塞 Article。
 - **Typefully 的 Article 标题取自正文首个 H1**，`title` 字段不存在（传了报 422）；frontmatter 会被自动剥掉。
 - **`dueAt` 必须是未来时间**——确认拖过了预定时间就近立即发，agent 会在报告里说明。
-- **freeze 的 stdin 必须接 `/dev/null`**——给 pipe 它会忽略文件参数报 "No input"（脚本内已处理）。
+- **Buffer 线程读写字段不对称**——写入走 `metadata.twitter.thread`，读回来在 `metadata.thread`（`metadata.twitter.thread` 永远是空），发布后核对线程别查错字段。
 - **Typefully `media/upload` 的 `file_name` 必须是 ASCII**——中文文件名会 422（校验 `^[a-zA-Z0-9_.()\-]+\.ext$`），脚本已用 `code-1.png` 这类 ASCII 名上传，与本地中文 slug 解耦。
 - **`--publish-at now` 别直传给 Typefully**——它不认 "now" 字符串（会被静默当草稿存下、不发布），脚本已改成转近未来 ISO；且发布后要回读 `GET drafts/{id}` 确认真实状态（创建响应的 `status` 是瞬时值，可能显示 draft 但其实已 published）。
 - **Typefully 短推配图挂在 `posts[].media_ids`，不在草稿顶层**——顶层没有 `media` 字段（schema 是 `additionalProperties: false`，多传会 422）；`x_article` 是 standalone 平台，**不能与 `x` 平台混在同一草稿**（脚本已把长文/短推做成互斥模式）；Typefully 媒体上传没有 alt 文本字段，配图需要无障碍描述时用 Buffer 通道的 `--alt`。
@@ -151,7 +151,7 @@ skills/
 │   ├── SKILL.md             # 流程、风格规范、红线、全部实测经验
 │   ├── scripts/
 │   │   ├── config.mjs       # 配置加载（config.json + 环境变量 + 自动发现）
-│   │   ├── buffer-post.mjs  # Buffer 发布（零依赖，直连 MCP 端点；--thread-file 发线程，--dry-run 自检字数）
+│   │   ├── buffer-post.mjs  # Buffer 发布（零依赖，直连 MCP 端点；线程支持编号「1/ 」或 --- 拆分、逐条 [img] 配图，--dry-run 看 payload）
 │   │   ├── typefully-post.mjs # Typefully 长文 Article + 短推/推串（--text-file/--thread-file，--dry-run 自检字数）
 │   │   ├── md-assets.mjs    # Markdown → X 化排版预处理
 │   │   ├── gist.mjs         # Article 代码块 → 单文档 Gist（「代码块 N」标题对照，可复制源码）

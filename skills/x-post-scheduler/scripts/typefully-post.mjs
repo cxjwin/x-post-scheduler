@@ -11,9 +11,18 @@
 //   node typefully-post.mjs --markdown-file article.md \
 //       [--publish-at "2026-07-16T08:00:00+08:00" | --publish-at now | --publish-at next-free-slot] \
 //       [--cover /path/to/cover.png] [--draft-title "内部草稿名"] [--social-set <id>] \
-//       [--no-transform] [--no-gist | --gist-url <已有 gist URL>]
+//       [--no-transform] [--no-gist | --gist-public | --gist-url <已有 gist URL>] \
+//       [--gist-links comment|body] [--dry-run]
 //       创建 X Article：正文为 Markdown，文章标题自动取自首个 # 一级标题。
 //       不带 --publish-at 时仅存为草稿（可在 Typefully 里预览后再排期）。
+//       多行代码块转图的同时自动打包一个配套 gist（一文一 gist、单 markdown 文档、
+//       「## 代码块 N」标题与图上标题栏一致；默认 secret 未列出，--gist-public 转公开、
+//       --no-gist 关闭、--gist-url 复用已有）。
+//       gist 链接默认不进正文（--gist-links comment：保护推荐分发，与短推「链接放首评」
+//       同一逻辑）——正文只留一句纯文本提示，链接由发布后手动补的首评承载（脚本结尾打印）；
+//       --gist-links body 改为每张代码图下挂「复制 代码块 N」标题锚点深链 + 文末总链接
+//       （正文会带外链，分发影响自行权衡）。
+//       长文加 --dry-run：只做本地转换并打印最终 payload——不创建 gist、不上传媒体、不建草稿。
 //   node typefully-post.mjs --text-file tweet.txt \
 //       [--image /path/img.png（可重复，均挂首条，X 单推上限 4 张）] \
 //       [--first-comment "原文：https://..."] [--publish-at 同上] [--draft-title ...] [--social-set <id>]
@@ -62,7 +71,9 @@ function parseArgs(argv) {
     else if (k === '--social-set') a.socialSet = argv[++i];
     else if (k === '--no-transform') a.noTransform = true;
     else if (k === '--no-gist') a.noGist = true;
+    else if (k === '--gist-public') a.gistPublic = true;
     else if (k === '--gist-url') a.gistUrl = argv[++i];
+    else if (k === '--gist-links') a.gistLinks = argv[++i];
   }
   return a;
 }
@@ -187,12 +198,19 @@ if (a.mdFile && tweetMode) {
   console.error('错误：--markdown-file（长文）与 --text-file/--thread-file（短推）只能二选一。');
   process.exit(1);
 }
-if (tweetMode && (a.cover || a.noTransform || a.noGist || a.gistUrl)) {
-  console.error('错误：--cover/--no-transform/--no-gist/--gist-url 仅用于长文模式；短推配图请用 --image <本地图片路径>。');
+if (tweetMode && (a.cover || a.noTransform || a.noGist || a.gistUrl || a.gistPublic || a.gistLinks)) {
+  console.error('错误：--cover/--no-transform/--no-gist/--gist-public/--gist-url/--gist-links 仅用于长文模式；短推配图请用 --image <本地图片路径>。');
   process.exit(1);
 }
-if (!tweetMode && (a.images || a.firstComment || a.dryRun)) {
-  console.error('错误：--image/--first-comment/--dry-run 仅用于短推模式（--text-file/--thread-file）；长文排版自检请用 md-assets.mjs --test。');
+if (!tweetMode && (a.images || a.firstComment)) {
+  console.error('错误：--image/--first-comment 仅用于短推模式（--text-file/--thread-file）。');
+  process.exit(1);
+}
+
+// gist 链接放哪：comment（默认）= 正文零外链、链接走发布后手动首评；body = 图下深链 + 文末总链接
+const gistLinks = a.gistLinks || 'comment';
+if (!['comment', 'body'].includes(gistLinks)) {
+  console.error(`错误：--gist-links 只接受 comment 或 body（收到 "${gistLinks}"）。`);
   process.exit(1);
 }
 
@@ -208,8 +226,9 @@ if (tweetMode && !segments.length) {
   process.exit(1);
 }
 
-// dry-run 在读 token 之前退出：不需要任何凭据、不做任何网络请求。
-if (a.dryRun) {
+// 短推 dry-run 在读 token 之前退出：不需要任何凭据、不做任何网络请求。
+// （长文 dry-run 在下方长文分支里处理：本地转换 + 打印 payload，同样不出网。）
+if (tweetMode && a.dryRun) {
   segments.forEach((s, i) => {
     const w = xWeight(s);
     console.log(`--- [${i + 1}/${segments.length}] 计数字符 ≈ ${w}${w > 280 ? '（超 280：免费档发不出；Premium+ 可发但时间线折叠）' : ''} ---`);
@@ -220,7 +239,8 @@ if (a.dryRun) {
   process.exit(0);
 }
 
-const token = getToken();
+// 长文 dry-run 全程不出网（本地转换 + 打印 payload），不要求 token；--check 仍需要
+const token = a.dryRun && !a.check ? null : getToken();
 const cfg = loadConfig();
 
 if (a.check) {
@@ -233,7 +253,9 @@ if (!a.mdFile && !tweetMode) {
   process.exit(1);
 }
 
-const socialSet = await resolveSocialSet(token, cfg, a.socialSet);
+const socialSet = a.dryRun
+  ? a.socialSet || cfg.typefullySocialSet || '(dry-run)'
+  : await resolveSocialSet(token, cfg, a.socialSet);
 
 // —— 短推/推串模式：platforms.x（enabled 必填，posts 每项一条推文、上限 50 条）——
 // 配图挂在 posts[].media_ids（每条上限 10，X 实际单推上限 4 张图）；本地文件直传 Typefully，
@@ -276,38 +298,60 @@ if (!h1) console.error('警告：Markdown 中没有一级标题（# ...），文
 // （![](url)）在 X Article 里不渲染、只显示成链接文本。所以这里把图生成到本地临时目录
 // （push:false，不推 github 图床，也不依赖 assets_dir），逐张上传 Typefully 后把占位图
 // 替换成 <typ:media media_id> 标签。短推走 Buffer 才用图床外链，两套机制不要混。
+let gist = null; // 配套代码 gist；无代码块 / --no-gist / 创建失败时保持 null
 if (!a.noTransform) {
   const slug = (h1 ? h1[1] : basename(a.mdFile, '.md')).trim();
   const tmpDir = join(tmpdir(), 'xps-article-media');
   const codeFiles = extractCodeFiles(md);
-  let gistUrl = a.gistUrl || null;
-  if (codeFiles.length && !gistUrl && !a.noGist) {
-    try {
-      // 单文档 gist：全部代码块组织进一个 markdown 文件，「## 代码块 N」标题
-      // 与正文代码图的标题栏一字不差，图下深链按标题锚点直达对应块。
-      const gist = await createCodeGist({
-        files: [buildGistDoc(codeFiles)],
-        description: `X Article：${h1 ? h1[1].trim() : slug}`,
-      });
-      gistUrl = gist.url;
-      console.log(`代码 Gist：${gist.url}（${codeFiles.length} 个代码块，单文档，secret）`);
-    } catch (e) {
-      console.error(`警告：代码 Gist 创建失败，文章仍会继续，但代码图下没有复制链接：${e.message || e}`);
+
+  // 代码可复制通道：全部多行代码块打包成一个 gist——单 markdown 文档，「## 代码块 N」
+  // 标题与正文代码图的标题栏一字不差（buildGistDoc，设计与认证见 gist.mjs 头注释）。
+  // 链接默认不进正文（comment 模式，保护推荐分发，与短推「原文链接放首评」同一逻辑）：
+  // 正文只留一句纯文本提示，gist 链接由发布后手动补的首评承载——X Article 没有 API
+  // 首评通道（Typefully 的 x_article 是 standalone 平台、不能与普通推文组合，Buffer
+  // 也不能回复外部帖），脚本结尾会打印首评文本。--gist-links body 时改为图下按标题
+  // 锚点挂「复制 代码块 N」深链 + 文末总链接。gist 创建失败不阻塞发布。
+  if (codeFiles.length && !a.noGist) {
+    if (a.gistUrl) {
+      gist = { url: a.gistUrl, id: null };
+    } else if (a.dryRun) {
+      gist = { url: 'https://gist.github.com/DRY-RUN', id: null };
+      console.log(`[dry-run] 将创建${a.gistPublic ? '公开' : ' secret '}单文档 gist（${codeFiles.length} 个代码块）`);
+    } else {
+      try {
+        gist = await createCodeGist({
+          files: [buildGistDoc(codeFiles)],
+          description: `${h1 ? h1[1].trim() : slug} — 本文代码整理（配套 X Article，可复制）`,
+          isPublic: !!a.gistPublic,
+        });
+        console.log(`代码 gist 已创建（${a.gistPublic ? '公开' : 'secret 未列出'}，${codeFiles.length} 个代码块，单文档）：${gist.url}`);
+      } catch (e) {
+        console.error(`警告：代码 gist 创建失败，文章仍会发布，但代码块只有图片、没有复制通道。原因：${e.message}`);
+        console.error('  修复：安装并登录 gh CLI（brew install gh && gh auth login）或设置 GH_TOKEN，node gist.mjs --check 可自检。');
+      }
     }
   }
+
   const { md: transformed, assets, stats } = await transformMarkdownBody(md, {
     slug,
     push: false,
     outDir: tmpDir,
-    codeCopyBaseUrl: gistUrl,
+    // body 模式才在每张代码图下生成「复制 代码块 N」深链；comment 模式正文零外链
+    codeCopyBaseUrl: gist && gistLinks === 'body' ? gist.url : null,
   });
   if (transformed !== md) {
     md = transformed;
     let idx = 0;
     for (const asset of assets) {
       idx++;
-      const mid = await uploadMedia(token, socialSet, asset.localPath, `${asset.kind}-${idx}`);
+      const mid = a.dryRun ? `DRY-RUN-${idx}` : await uploadMedia(token, socialSet, asset.localPath, `${asset.kind}-${idx}`);
       md = md.replace(new RegExp(`!\\[[^\\]]*\\]\\(${esc(asset.url)}\\)`, 'g'), `<typ:media media_id="${mid}" />`);
+    }
+    if (gist) {
+      md += gistLinks === 'body'
+        ? `\n\n**本文代码**：全部代码块的可复制版本 → [GitHub Gist](${gist.url})`
+        // comment 模式正文零外链：纯文本提示指向评论区，链接本体在发布后的首评里
+        : `\n\n**本文代码**：全部代码块的可复制版本见评论区（GitHub Gist）`;
     }
     const parts = [];
     if (stats.codeImg) parts.push(`代码块→图 ${stats.codeImg}`);
@@ -316,7 +360,8 @@ if (!a.noTransform) {
     if (stats.tableList) parts.push(`小表格→列表 ${stats.tableList}`);
     if (stats.inline) parts.push(`行内代码→「」 ${stats.inline}`);
     if (stats.heading) parts.push(`H3+→加粗 ${stats.heading}`);
-    if (assets.length) parts.push(`${assets.length} 张图上传 Typefully(typ:media)`);
+    if (assets.length) parts.push(a.dryRun ? `${assets.length} 张图待上传（dry-run 未上传）` : `${assets.length} 张图上传 Typefully(typ:media)`);
+    if (gist) parts.push(gistLinks === 'body' ? '代码图已挂 gist 标题锚点深链' : 'gist 链接走首评（正文零外链）');
     console.log(`X 化排版：${parts.join('，')}。`);
     const leftover = md.match(/!\[[^\]]*\]\([^)]+\)/g);
     if (leftover) console.error(`警告：${leftover.length} 张正文图未转成 typ:media，X Article 里可能不显示：${leftover.slice(0, 3).join(' ')}`);
@@ -327,8 +372,12 @@ if (!a.noTransform) {
 // 复用 uploadMedia（内部已轮询 ready，不用再手动 sleep）。
 let coverMediaId = null;
 if (a.cover) {
-  coverMediaId = await uploadMedia(token, socialSet, a.cover, 'cover');
-  console.log(`封面已上传：media_id=${coverMediaId}`);
+  if (a.dryRun) {
+    console.log(`[dry-run] 封面将上传：${a.cover}`);
+  } else {
+    coverMediaId = await uploadMedia(token, socialSet, a.cover, 'cover');
+    console.log(`封面已上传：media_id=${coverMediaId}`);
+  }
 }
 
 // 创建 X Article（长文）：正文和封面都必须嵌套在 platforms.x_article 下。
@@ -344,4 +393,19 @@ const payload = {
   },
 };
 
+if (a.dryRun) {
+  console.log('\n[dry-run] 未创建草稿。payload 如下（content_markdown 为转换后的最终正文）：');
+  console.log(JSON.stringify(payload, null, 2));
+  process.exit(0);
+}
+
 await createDraftAndReport(token, socialSet, payload, a.publishAt, { titleFallback: '(取自 H1)' });
+
+// X Article 无 API 首评通道（见上），评论区的 gist 链接需发布后手动补一条
+if (gist) {
+  console.log(gistLinks === 'comment'
+    ? '首评（正文未带任何外链，这条是读者唯一的复制入口——发布后务必手动贴到评论区，先记入 pending-replies.md）：'
+    : '建议首评（正文已带深链，这条是补充曝光，可选）：');
+  console.log(`  本文代码可复制版 → ${gist.url}`);
+  if (gist.id) console.log(`（若最终放弃这篇草稿，记得清理配套 gist：gh gist delete ${gist.id}）`);
+}

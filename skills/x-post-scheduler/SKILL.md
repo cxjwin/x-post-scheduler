@@ -1,12 +1,14 @@
 ---
 name: x-post-scheduler
-description: 把资讯文章链接变成 X (Twitter) 帖子并通过 Buffer 发布/排期：抓取原文 → 自主选风格写中文摘要短评（单版本）→ 生成海报（可选）→ 发布前人工确认（可在本文件内开启全自动）→ 立即发布或按用户指定时间排期 → 原文链接放首条评论。另含长文支线：用户说「发长文」「排期 Article」时经 Typefully 发布 X Article（Typefully 亦可作短推/推串排期的备选通道）。当用户给出文章链接（AI / 编程资讯为主）并希望发到 X 时使用本 skill——即使只丢一个链接不带说明，也应触发流程（默认会在发布前请用户确认）。一次给多个链接时，逐篇独立走完整流程。注意：提示词带「深度」二字（「深度读一下」「这篇走深度」）时不走本流水线，改用 deep-read skill（互动式深读 → 讨论校准 → 读后感/线程）。
+description: 把资讯文章链接变成 X (Twitter) 帖子并通过 Buffer 发布/排期：抓取原文 → 自主选风格写中文摘要短评（单版本）→ 生成海报（可选）→ 发布前人工确认（可在本文件内开启全自动）→ 立即发布或按用户指定时间排期 → 原文链接放首条评论。另含线程支线：用户说「发线程」「发推串」「拆成 thread」时把内容写成多条接龙推文，经 Buffer 一次发布成线程；及长文支线：用户说「发长文」「排期 Article」时经 Typefully 发布 X Article（Typefully 亦可作短推/推串排期的备选通道）。当用户给出文章链接（AI / 编程资讯为主）并希望发到 X 时使用本 skill——即使只丢一个链接不带说明，也应触发流程（默认会在发布前请用户确认）。一次给多个链接时，逐篇独立走完整流程。注意：提示词带「深度」二字（「深度读一下」「这篇走深度」）时不走本流水线，改用 deep-read skill（互动式深读 → 讨论校准 → 读后感/线程）。
 ---
 
 # x-post-scheduler：资讯 → 摘要短评 + 海报 → Buffer 发布/排期
 
 流程共 5 步，顺序执行：抓取 → 摘要（自主选风格，单版本）→ 海报（可选）→ **发布决策（默认人工确认，可开全自动）** → Buffer 发布/排期 → 发布后报告。
 用户一次给多个链接时，每篇独立走完整流程。
+用户要求「发线程」时流程不变，只有两处替换：摘要步改写成多条接龙推文（见第 2 步「线程写法」），发布步用 `--thread-file`（见第 5 步）。
+用户要求「深度读一下」「这篇走深度」时，改用 deep-read skill，不进入本快速流水线。
 
 ## 第 0 步：配置从哪来
 
@@ -51,6 +53,16 @@ node .claude/skills/x-post-scheduler/scripts/setup.mjs
 原文链接放首评、不占正文。
 
 **排版**：适当增加换行改善阅读体验——钩子句、要点块、结尾短评三部分之间**空一行**分隔；要点行之间不空行、保持成块。密集文字墙在 X 上点开率低，留白是排版的一部分。
+
+### 线程写法（用户说「发线程」「发推串」时）
+
+线程 = 多条接龙推文，是「单推塞不下、又不到 Article 篇幅」的中间形态。默认不主动出线程；用户明确要求时才用，或在要点确实多到单推装不下时提议一句、用户点头再写。
+
+- **结构**：首条 = 钩子 + 一句预告整串讲什么（首条就是整串的折叠线，决定点开率）；中间每条只讲一个要点、含至少一个具体信息点，单独被转发也要能读通；末条用一句从业者判断收尾。原文链接不占正文，发布时自动追加为线程最后一条（`--first-comment` 通道）。
+- **编号**：每条开头「1/ 」「2/ 」…编号、斜杠后带空格（末条可写「n/n」收束）。编号行同时就是发布脚本的拆分标记——线程文件按编号写即可，不必再加 --- 分隔行。条数 3~7 条为宜；要点多到 7 条打不住，建议用户改发 Article。
+- **长度**：免费账号**每一条**都要 ≤ 280 计数字符（计数规则同上）；Premium+ 也别单条塞爆——线程的价值是节奏，条条塞满不如直接发一条长推。发布脚本会打印每条计数，超限带 ⚠ 提醒，看到就回头改稿。
+- **排版**：每条内部沿用留白规则（钩子/要点/短评之间空行）。
+- **配图**：海报（如有）放首条；中间某条需要单独配图时，图先推图床拿 raw URL，再用 `[img]` 行写进线程文件（语法见第 5 步）。
 
 ### 人设与语气
 
@@ -162,6 +174,18 @@ node .claude/skills/x-post-scheduler/scripts/buffer-post.mjs \
   --image-url "<图床 raw URL>" --alt "<海报描述>" \
   --first-comment "原文：<URL>" \
   [--due-at "2026-07-11T08:00:00+08:00"]
+# 发线程：--thread-file 替代 --text-file，其余参数含义不变。拆分方式二选一：
+# a) 行首编号「1/ 」「2/ 」…（可带总数如「3/3 」）自动拆条——编号从 1 连续、
+#    编号行前空一行、斜杠后带空格（正文里「1/3 的用户」这类分数不会被误拆）；
+# b) 推文之间用单独一行 --- 分隔（两种写法并存时以 --- 为准）。
+# 某条要单独配图时在该条内写一行「[img] <图床 raw URL> | <alt 描述>」；
+# --image-url（海报）附到首条，--first-comment 自动成为线程最后一条。
+# 拿不准拆分结果时先加 --dry-run 看 payload（不发帖、不需要 token），确认无误再去掉重跑。
+node .claude/skills/x-post-scheduler/scripts/buffer-post.mjs \
+  --thread-file /tmp/thread.txt \
+  --image-url "<图床 raw URL>" --alt "<海报描述>" \
+  --first-comment "原文：<URL>" \
+  [--due-at "2026-07-11T08:00:00+08:00"]
 ```
 
    token 自动从环境变量 `BUFFER_TOKEN`、`~/.config/buffer/key` 或 `~/.claude.json` 读取；频道未配置时自动发现（恰好一个 X 频道时）。都解析不到才停下来请用户配置；Buffer 整条通道不可用（无 token / 免费版排期额度满）时，可改走 Typefully 短推通道（见附录），发布决策规则不变。
@@ -202,8 +226,12 @@ node .claude/skills/x-post-scheduler/scripts/typefully-post.mjs --check
 node .claude/skills/x-post-scheduler/scripts/typefully-post.mjs \
   --markdown-file 文章.md \
   [--cover 封面.png] \
-  [--no-gist | --gist-url "已有 Gist URL"] \
+  [--no-gist | --gist-public | --gist-url "已有 Gist URL"] \
+  [--gist-links comment|body] \
   [--publish-at "2026-07-16T08:00:00+08:00" | --publish-at now]   # 不带此参数=仅存草稿；now=立即发布
+# --gist-links 默认 comment：正文零外链，gist 链接走发布后手动首评（脚本结尾打印首评文本）；
+# body 则每张代码图下挂「复制 代码块 N」标题锚点深链 + 文末总链接（正文带外链，分发影响自行权衡）。
+# 长文 --dry-run：只做本地转换并打印最终 payload（不建 gist、不上传媒体、不建草稿），检查转换结果用。
 ```
 
 规则：
@@ -212,7 +240,9 @@ node .claude/skills/x-post-scheduler/scripts/typefully-post.mjs \
 - 发布方式：`--publish-at` 传明确 ISO 时间则排期，传 `now` 则立即发布（脚本会把 `now` 转成近未来 ISO——**Typefully 不接受 "now" 字符串，直传会被静默当草稿存下、不发布**）；不带 `--publish-at` 仅存草稿
 - **发布后必须回读真实状态**：创建响应里的 `status` 是瞬时值（`publish_at` 生效后其实可能已 published，响应仍显示 draft），脚本已内置轮询 `GET drafts/{id}` 确认最终状态并打印 `x_article_published_url`，别只信创建响应
 - token 从环境变量 `TYPEFULLY_KEY` 或 `~/.config/typefully/key` 读取；social set 未配置时自动发现（恰好一个时）
-- 多行代码块默认汇总成**一篇 Article 一个 secret Gist**：gist 内是单个 markdown 文档，「## 代码块 N」中文标题与正文代码图的标题栏一字不差，GitHub 渲染后每块自带复制按钮；每张代码图下附「复制 代码块 N」深链，按标题锚点（`#代码块-N` 的 percent-encoded 形式）直达对应小节。认证按已登录 `gh` CLI → `GH_TOKEN`/`GITHUB_TOKEN`。认证不可用时只警告并继续发文；`--no-gist` 可关闭，`--gist-url` 可复用已有 Gist，避免重建
+- **代码可复制性（配套 gist，脚本自动执行）**：代码块转图后读者无法复制，脚本把全部多行代码块汇总成**一篇 Article 一个 secret Gist**——gist 内是单个 markdown 文档，「## 代码块 N」中文标题与正文代码图的标题栏一字不差，GitHub 渲染后每块自带复制按钮，读者按标题对照复制。默认 **secret**（未列出：仅持链接可见、不进个人列表、不被索引——草稿阶段就会创建，未发布/放弃时不至于把代码公开广播），`--gist-public` 改公开、`--no-gist` 关闭、`--gist-url` 复用已有。认证按已登录 `gh` CLI → `GH_TOKEN`/`GITHUB_TOKEN`（`node gist.mjs --check` 自检），不可用时只警告并继续发文。**放弃草稿时记得 `gh gist delete <id>` 同步清理**（脚本结尾会打印这条命令）
+- **gist 链接默认不进正文（`--gist-links comment`，保护推荐分发）**：与短推「原文链接放首评、不占正文」同一逻辑——正文外链有降权风险，也是阅读中途的流失出口。默认正文只在文末留一句**纯文本**提示「全部代码块的可复制版本见评论区」（无任何链接），gist 链接由发布后手动补的首评承载。用户明确接受正文带外链时用 `--gist-links body`：每张代码图下挂「复制 代码块 N」深链（`#代码块-N` percent-encoded 标题锚点直达对应小节）+ 文末总链接
+- **首评补 gist 链接（comment 模式下必做）**：X Article 没有 API 首评通道——Typefully 的 `x_article` 是 standalone 平台、不能与普通推文组合，Buffer 也不能回复外部帖。脚本结尾会打印首评文本「本文代码可复制版 → <gist url>」：把它按 `pending-replies.md` 格式记下，文章发出后提醒用户手动贴到评论区。**comment 模式（默认）下这条首评是读者唯一的复制入口，漏发 = 复制通道断掉**，发布后报告里必须显式提醒；body 模式下它只是补充曝光，可选
 - 已验证的 API 事实：`x_article.content_markdown` 为正文字段，**文章标题取自正文首个 H1**（`x_article` 下没有 `title` 字段，传了报 422 extra_forbidden）；封面走 `--cover`（顶层 `cover_media_id`）；frontmatter 会被脚本自动剥掉。改错草稿用 `DELETE /v2/social-sets/{ss}/drafts/{id}`（实测返回 204；已发布的 Article 删 Typefully 记录**不撤回** X 上的原生文章，需在 X 手动删）
 - 发布 Article 需要账号有 X Premium
 
@@ -222,7 +252,7 @@ X Article 的 markdown 子集只支持标题(H1/H2)/粗体/引用/列表/链接�
 
 | 元素 | 处理 |
 |------|------|
-| 多行代码块 | 渲染成语法高亮 PNG，**图上带「代码块 N · 语言」标题栏**（freeze github-dark 出图后复合标题；**代码含中文或 freeze 不可用时退回系统浏览器深色模板**，freeze 对 CJK 缺字体防豆腐块），上传 Typefully 后以 `<typ:media>` 原位嵌入；图下附「复制 代码块 N」深链直达 gist 内同标题小节 |
+| 多行代码块 | 渲染成语法高亮 PNG（**shiki** github-dark 高亮 + 系统 Chrome 截图，浏览器字体栈渲染、**中文注释同样全彩**不豆腐），**图上带「代码块 N · 语言」标题栏**与配套 gist 文档标题一致，上传 Typefully 后以 `<typ:media>` 原位嵌入；`--gist-links body` 时图下另挂「复制 代码块 N」标题锚点深链 |
 | 单行代码块 | 转正文文本行（shell 类语言加「$ 」前缀），不出图 |
 | 表格 ≤2 列且 ≤8 行 | 改写成「- **键**：值」列表（手机端列表比表格图好读，这是升级不是妥协） |
 | 更大的表格 | 深色 GitHub 风 PNG（#0d1117 底，与海报视觉统一），同样走 `<typ:media>` 嵌入 |
@@ -231,15 +261,13 @@ X Article 的 markdown 子集只支持标题(H1/H2)/粗体/引用/列表/链接�
 
 - **正文图走 Typefully 媒体，不走 github 图床**：`typefully-post.mjs` 把图生成到本地临时目录，逐张 `media/upload`（POST 拿预签名 URL → 裸 PUT 字节 → 轮询 `ready`）拿 `media_id` 再替换成 `<typ:media>`。所以发 Article **不需要 `assets_dir` 图床**（那是短推 Buffer 用的），也不用担心图床图被删导致文章裂图
 - **上传的 `file_name` 必须是 ASCII**：Typefully 校验 `^[a-zA-Z0-9_.()\-]+\.(png|jpg|...)$`，中文名会 422；脚本用 `code-1.png`/`table-1.png` 这类 ASCII 名，与本地中文 slug 解耦
-- 依赖 freeze：`brew install charmbracelet/tap/freeze`；未安装不阻塞，所有代码块走 **puppeteer-core + 系统浏览器**兜底——所以**发带代码块/表格的长文，`npm install` 与本机 Chrome/Edge/Chromium 是必需条件**（`cd scripts && npm install`），也可用 `CHROME_PATH` 显式指定浏览器
+- 渲染依赖：**puppeteer-core + shiki**（`cd scripts && npm install`，几 MB、不下载 Chromium）+ 本机已装的 Chrome/Edge/Chromium——`browser.mjs` 按 `CHROME_PATH` 等环境变量 → 系统 Chrome → Edge/Chromium/Brave 常见路径的顺序自动定位。**发带代码块/表格的长文这是必需依赖**，缺了预处理直接失败
 - Gist 通道自检：`node .claude/skills/x-post-scheduler/scripts/gist.mjs --check`（只检查认证，不创建 Gist）
 - 独立自测（`md-assets.mjs --test` 默认不 push、图片落在 `<output_dir>/md-assets-test/`，仅用于肉眼检查转换结果）：
 
 ```bash
 node .claude/skills/x-post-scheduler/scripts/md-assets.mjs --test 文章.md
 ```
-
-- 实测坑：node 里 `execFileSync` 调 freeze 时 stdin 必须给 `ignore`——给 `pipe` 的话 freeze 会认为输入来自 stdin，忽略文件参数报 "No input"（脚本内已处理，改脚本时别动这行）
 
 ### Typefully 短推/推串（Buffer 的备选排期通道）
 
@@ -266,6 +294,8 @@ node .claude/skills/x-post-scheduler/scripts/typefully-post.mjs --thread-file /t
 - 频道 ID 用 `list_channels` 确认；报「channel not found」时重新确认（脚本的自动发现即此流程）
 - **图片限制：`assets[].image.url` 只收可公开访问的 URL，不能直接传本地 PNG 路径**。已用 `introspect_schema` 确认：GraphQL 没有任何媒体上传 mutation，不用再探查
 - **图片清理策略（实测确认）**：`get_post` 返回的 `assets[].source` 保持原 raw URL，**Buffer 不转存图片**。因此：排期未发出的帖子，图床上的图绝不可删；帖子发出（status: sent）后随便删（X 已转存到 pbs.twimg.com）
-- **thread 首评（实测确认可用）**：外层 `text` 与 `metadata.twitter.thread[0].text` 一致，图片资产同时放外层 `assets` 和 `thread[0].assets`，首评「原文：{URL}」作为 `thread[1]`，一次 `create_post` 即完成主推 + 首评。多条线程（deep-read skill 用）走同一通道：脚本 `--thread-file`（各条之间用单独一行 `---` 分隔）把全部条目放进 `thread[]`；>2 条属 MCP schema 文档能力、尚未单独实测，首发后到 X 核对整串
+- **thread 首评（实测确认可用）**：外层 `text` 与 `metadata.twitter.thread[0].text` 一致，图片资产同时放外层 `assets` 和 `thread[0].assets`，首评「原文：{URL}」作为 `thread[1]`，一次 `create_post` 即完成主推 + 首评
+- **发线程走同一 `thread` 数组**：数组放 N 条即整串，每条可带自己的 `assets`（`--thread-file` 即此通道，脚本已按上述已验证结构组装）。8 条纯文字线程已全链路实测通过（2026-07-21：排期 → 到点 sent → 返回 externalLink，仅迟 8 秒）；带图长线程与更多条数未单独验证，若 Buffer 套餐有限制以实际报错为准
+- **thread 读写字段不对称（实测踩坑）**：写入走 `metadata.twitter.thread`，但 `get_post` 读回来是 `metadata.thread` + `metadata.threadCount`——发布后核对线程时别查 `metadata.twitter.thread`（永远是空），查 `metadata.thread`
 - 排期模式：明确时间用 `mode: customScheduled` + `dueAt`（ISO 8601 带时区偏移，**必须是未来时间**）；`schedulingType` 用 `automatic`（自动发布）
 - 免费版限额：3 频道 / 10 条排期，够个人号用

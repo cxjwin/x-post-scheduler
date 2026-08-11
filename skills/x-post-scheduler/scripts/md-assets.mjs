@@ -5,7 +5,9 @@
 // 降级成 blockquote、GFM 表格直接不支持、行内代码反引号原样显示。本模块在 typefully-post.mjs
 // 发长文前自动调用，按元素类型分流：
 //
-//   代码块  多行 → 语法高亮 PNG（freeze 渲染；含中文/freeze 不可用时退回 puppeteer 深色模板）
+//   代码块  多行 → 语法高亮 PNG（shiki github-dark 高亮 + 系统 Chrome 截图，浏览器字体栈
+//           渲染，中文注释同样全彩不豆腐），图上带「代码块 N · 语言」标题栏（与配套 gist
+//           文档的标题一字不差，读者按标题对照复制）
 //           单行 → 正文普通文本行（shell 类语言加「$ 」前缀），不出图
 //   表格    2 列且 ≤8 行 → 改写成「- **键**：值」列表（手机端列表比表格图好读）
 //           其余 → 深色 GitHub 风表格 PNG（与海报视觉统一）
@@ -25,7 +27,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { execSync, execFileSync } from 'child_process';
+import { execSync } from 'child_process';
 import { loadConfig, deriveRawBase } from './config.mjs';
 import { launchBrowser } from './browser.mjs';
 import { gistDocAnchor, gistDocHeading } from './gist.mjs';
@@ -37,12 +39,8 @@ const SMALL_TABLE_MAX_ROWS = 8;
 // 单行代码块加「$ 」前缀的语言（明确是 shell 命令才加）
 const SHELL_LANGS = new Set(['bash', 'sh', 'shell', 'zsh', 'console', 'shellsession']);
 
-// freeze 的 --language 用 chroma 词法器名，做几个常用别名映射
-const FREEZE_LANG_ALIAS = {
-  mjs: 'javascript', cjs: 'javascript', js: 'javascript',
-  ts: 'typescript', sh: 'bash', shell: 'bash', zsh: 'bash',
-  yml: 'yaml', txt: 'text', plaintext: 'text',
-};
+// shiki 自带绝大多数语言别名（js/ts/sh/zsh…），这里只补差集
+const SHIKI_LANG_ALIAS = { mjs: 'javascript', cjs: 'javascript', txt: 'text', plaintext: 'text' };
 
 function escapeHtml(s) {
   return String(s)
@@ -57,21 +55,6 @@ function slugify(s) {
     .replace(/[^\p{Script=Han}a-zA-Z0-9._-]+/gu, '-')
     .replace(/^-+|-+$/g, '')
     .slice(0, 60) || 'md';
-}
-
-function hasCJK(s) {
-  return /[　-〿㐀-鿿豈-﫿＀-￯]/.test(s);
-}
-
-function findFreeze() {
-  for (const c of ['/opt/homebrew/bin/freeze', '/usr/local/bin/freeze']) {
-    if (fs.existsSync(c)) return c;
-  }
-  try {
-    const p = execSync('which freeze', { stdio: 'pipe' }).toString().trim();
-    if (p) return p;
-  } catch {}
-  return null;
 }
 
 // ---- 抽取 fenced code block（先抽，避免表格误吞代码里的 | 行）----
@@ -158,59 +141,37 @@ function tableToList(header, data, stats) {
   return convertInlineCode(items.join('\n'), stats);
 }
 
-// ---- 渲染：代码块（freeze 语法高亮，深色主题匹配品牌）----
-function renderCodeWithFreeze(freezeBin, code, lang, outPath) {
-  const tmp = path.join(os.tmpdir(), `freeze-${process.pid}-${Math.random().toString(36).slice(2)}.txt`);
-  fs.writeFileSync(tmp, code);
+// ---- 渲染：代码块（shiki github-dark 高亮 → 深色卡片 → 系统 Chrome 截图）----
+// shiki 纯 JS（textmate 语法 + WASM 正则），无网络无原生依赖；shorthand 内部缓存
+// highlighter 单例，多次调用不重复初始化。未知语言退回纯文本着色。
+async function highlightCode(code, lang) {
+  let codeToHtml;
   try {
-    const language = FREEZE_LANG_ALIAS[lang] || lang || 'text';
-    execFileSync(freezeBin, [
-      tmp,
-      '--language', language,
-      '--theme', 'github-dark',
-      '--background', '#0d1117',
-      '--window',
-      '--padding', '24',
-      '--font.size', '15',
-      '--line-height', '1.5',
-      '--border.radius', '10',
-      '--output', outPath,
-      // stdin 必须 ignore（接 /dev/null）：给 pipe 的话 freeze 会认为输入来自 stdin，
-      // 忽略文件参数并报 "No input"（实测踩坑）
-    ], { stdio: ['ignore', 'pipe', 'pipe'] });
-  } finally {
-    fs.rmSync(tmp, { force: true });
+    ({ codeToHtml } = await import('shiki'));
+  } catch {
+    throw new Error('未找到 shiki（代码高亮依赖）。请先运行：cd skills/x-post-scheduler/scripts && npm install');
+  }
+  const language = SHIKI_LANG_ALIAS[lang] || lang || 'text';
+  // github-dark-default 主题背景即品牌色 #0d1117，与海报/表格视觉统一
+  try {
+    return await codeToHtml(code, { lang: language, theme: 'github-dark-default' });
+  } catch {
+    return await codeToHtml(code, { lang: 'text', theme: 'github-dark-default' });
   }
 }
 
-// ---- 渲染：代码块 puppeteer 兜底（CJK 安全，freeze 缺字体时的保真通道）----
-// title 为「代码块 N」标题（与 gist 文档里的标题一致，读者按标题对照复制）。
-function codeHtml(code, lang, title) {
-  const bar = title ? (lang ? `${title} · ${lang}` : title) : lang;
+// bar 为标题栏文字（「代码块 N · 语言」——与配套 gist 文档标题一致，读者按标题对照复制）。
+function codeHtml(highlightedPre, bar) {
   return `<!doctype html><html><head><meta charset="utf-8"><style>
   *{box-sizing:border-box;}
-  body{margin:0;background:#0d1117;padding:22px 26px;font-family:'SF Mono',Menlo,Consolas,'PingFang SC','Microsoft YaHei',monospace;color:#c9d1d9;display:inline-block;}
+  body{margin:0;background:transparent;display:inline-block;}
+  .card{background:#0d1117;border-radius:10px;padding:22px 26px;display:inline-block;}
   .bar{color:#8b949e;font-size:13px;margin-bottom:10px;font-family:-apple-system,'PingFang SC',sans-serif;letter-spacing:.04em;}
-  pre{margin:0;white-space:pre;font-size:15px;line-height:1.6;tab-size:2;}
-  </style></head><body>
+  pre{margin:0;white-space:pre;font-size:15px;line-height:1.6;tab-size:2;background:transparent !important;}
+  pre,code{font-family:'SF Mono',Menlo,Consolas,'PingFang SC','Microsoft YaHei',monospace;}
+  </style></head><body><div class="card">
   ${bar ? `<div class="bar">${escapeHtml(bar)}</div>` : ''}
-  <pre>${escapeHtml(code)}</pre></body></html>`;
-}
-
-// freeze 出的彩色 PNG 复合一条同款标题栏（freeze 自身不支持标题；标题栏底色与
-// freeze --background 一致，视觉上连成一张图）。字号在实测 freeze 输出缩放后标定。
-async function wrapPngWithTitle(png, title) {
-  const w = png.readUInt32BE(16); // PNG IHDR：宽高在固定偏移
-  const html = `<!doctype html><html><head><meta charset="utf-8"><style>
-  *{box-sizing:border-box;}
-  body{margin:0;background:#0d1117;display:inline-block;}
-  .bar{color:#8b949e;font-family:-apple-system,'PingFang SC',sans-serif;letter-spacing:.04em;
-       padding:20px 0 2px 30px;font-size:24px;}
-  img{display:block;width:${w}px;}
-  </style></head><body>
-  <div class="bar">${escapeHtml(title)}</div>
-  <img src="data:image/png;base64,${png.toString('base64')}"></body></html>`;
-  return renderHtmlToPng(html, w, 1);
+  ${highlightedPre}</div></body></html>`;
 }
 
 // ---- 渲染：表格（深色 GitHub 风，与海报视觉统一）----
@@ -226,16 +187,16 @@ function tableHtml(header, data) {
   </style></head><body>${`<table><thead><tr>${thead}</tr></thead><tbody>${tbody}</tbody></table>`}</body></html>`;
 }
 
-async function renderHtmlToPng(html, minWidth, deviceScaleFactor = 2) {
+async function renderHtmlToPng(html, minWidth) {
   const browser = await launchBrowser();
   try {
     const page = await browser.newPage();
-    await page.setViewport({ width: minWidth, height: 10, deviceScaleFactor });
+    await page.setViewport({ width: minWidth, height: 10, deviceScaleFactor: 2 });
     await page.setContent(html, { waitUntil: 'networkidle0' });
     // 内容比视口宽时（长代码行/宽表格）按实际宽度重设，避免截断
     const w = await page.evaluate(() => Math.ceil(document.body.scrollWidth) + 1);
     if (w > minWidth) {
-      await page.setViewport({ width: Math.min(w, deviceScaleFactor === 1 ? 3600 : 1800), height: 10, deviceScaleFactor });
+      await page.setViewport({ width: Math.min(w, 1800), height: 10, deviceScaleFactor: 2 });
     }
     const el = await page.$('body');
     return await el.screenshot({ type: 'png' });
@@ -248,7 +209,7 @@ function pushToImageBed(bedDir, files) {
   if (files.length === 0) return;
   const names = files.map((f) => JSON.stringify(path.basename(f)));
   execSync(`git add ${names.join(' ')}`, { cwd: bedDir, stdio: 'pipe' });
-  // 图片字节是确定的（puppeteer/freeze 渲染同一内容 → 同一字节），重发内容不变的文章时
+  // 图片字节是确定的（同一内容渲染 → 同一字节），重发内容不变的文章时
   // git 检测不到变化，直接 commit 会报 "nothing to commit" 抛错。所以先看有没有暂存变化：
   // 没有就说明图已在图床、直接跳过（用现有 URL），有才 commit/push。
   const staged = execSync('git diff --cached --name-only', { cwd: bedDir, stdio: 'pipe' }).toString().trim();
@@ -306,7 +267,6 @@ export async function transformMarkdownBody(mdBody, {
 
   const assets = [];
   const replacements = []; // { id, text }
-  const freezeBin = findFreeze();
   if (needsImages) fs.mkdirSync(bedDir, { recursive: true });
 
   let ci = 0;
@@ -324,17 +284,8 @@ export async function transformMarkdownBody(mdBody, {
     const p = path.join(bedDir, name);
     // 图上标题与 gist 文档标题同源（「代码块 N」），读者按标题在 gist 里对照复制
     const label = gistDocHeading(ci);
-    let rendered = false;
-    if (freezeBin && !hasCJK(b.code)) {
-      try {
-        renderCodeWithFreeze(freezeBin, b.code, b.lang, p);
-        fs.writeFileSync(p, await wrapPngWithTitle(fs.readFileSync(p), b.lang ? `${label} · ${b.lang}` : label));
-        rendered = true;
-      } catch {} // freeze 失败（未知语言等）静默退回 puppeteer
-    }
-    if (!rendered) {
-      fs.writeFileSync(p, await renderHtmlToPng(codeHtml(b.code, b.lang, label), 920));
-    }
+    const bar = b.lang ? `${label} · ${b.lang}` : label;
+    fs.writeFileSync(p, await renderHtmlToPng(codeHtml(await highlightCode(b.code, b.lang), bar), 920));
     const copyUrl = codeCopyBaseUrl
       ? `${codeCopyBaseUrl.replace(/#.*$/, '')}#${gistDocAnchor(ci)}`
       : null;
