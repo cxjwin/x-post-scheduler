@@ -246,8 +246,7 @@ async function renderHtmlToPng(html, minWidth, deviceScaleFactor = 2) {
 
 function pushToImageBed(bedDir, files) {
   if (files.length === 0) return;
-  const names = files.map((f) => JSON.stringify(path.basename(f)));
-  execSync(`git add ${names.join(' ')}`, { cwd: bedDir, stdio: 'pipe' });
+  execFileSync('git', ['add', '--', ...files.map((f) => path.basename(f))], { cwd: bedDir, stdio: 'pipe' });
   // 图片字节是确定的（puppeteer/freeze 渲染同一内容 → 同一字节），重发内容不变的文章时
   // git 检测不到变化，直接 commit 会报 "nothing to commit" 抛错。所以先看有没有暂存变化：
   // 没有就说明图已在图床、直接跳过（用现有 URL），有才 commit/push。
