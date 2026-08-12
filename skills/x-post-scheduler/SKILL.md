@@ -238,6 +238,7 @@ node .claude/skills/x-post-scheduler/scripts/typefully-post.mjs \
 规则：
 
 - **Article 发布保留人工确认**（这是作品级内容，不适用短推的自动发布授权）：默认先创建**草稿**，把预览链接（`private_url`）给用户，用户在 Typefully 里核对排版后，再按用户给的时间排期或立即发布
+- **发布前过一遍封面**：`--cover` 可选但建议带（首图直接影响时间线卡片的点开率，本系列前作均有封面）；真漏了不必慌，X Article 支持作者发布后编辑，海报补生成后到 X 文章编辑里上传即可（实际踩过：2026-08-12 裸发一篇后补的封面）
 - 发布方式：`--publish-at` 传明确 ISO 时间则排期，传 `now` 则立即发布（脚本会把 `now` 转成近未来 ISO——**Typefully 不接受 "now" 字符串，直传会被静默当草稿存下、不发布**）；不带 `--publish-at` 仅存草稿
 - **发布后必须回读真实状态**：创建响应里的 `status` 是瞬时值（`publish_at` 生效后其实可能已 published，响应仍显示 draft），脚本已内置轮询 `GET drafts/{id}` 确认最终状态并打印 `x_article_published_url`，别只信创建响应
 - token 从环境变量 `TYPEFULLY_KEY` 或 `~/.config/typefully/key` 读取；social set 未配置时自动发现（恰好一个时）

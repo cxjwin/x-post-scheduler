@@ -408,6 +408,10 @@ if (a.cover) {
     coverMediaId = await uploadMedia(token, socialSet, a.cover, 'cover');
     console.log(`封面已上传：media_id=${coverMediaId}`);
   }
+} else {
+  // 实际漏发过一次封面（2026-08-12）：发布命令没带 --cover，文章裸发。
+  // 封面影响时间线卡片的点开率，发布前值得提醒一句；漏了也可发布后在 X 文章编辑里补传。
+  console.error('提示：未指定 --cover，文章将无封面图。带 --publish-at 发布前建议确认是否需要；漏发可事后在 X 的文章编辑里补传。');
 }
 
 // 创建 X Article（长文）：正文和封面都必须嵌套在 platforms.x_article 下。
