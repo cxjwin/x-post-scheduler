@@ -36,7 +36,7 @@ Note: paths inside the SKILL.md files use `.claude/skills/x-post-scheduler/...` 
 
 Three skills; `meme-post` and `deep-read` are SKILL.md-only and share all scripts/config with `x-post-scheduler`. `deep-read` is deliberately interactive (summary + viewpoint draft → user discussion → calibrated final post); its SKILL.md forbids skipping the discussion step.
 
-**SKILL.md files are the core product.** They encode the agent workflow, editorial rules, red lines, and hard-won API facts (the「已验证的 API 事实」sections). When changing script behavior or flags, update the corresponding SKILL.md section and the README (config table +「已踩过的坑」list) — those are the contract agents rely on.
+**SKILL.md files are the core product.** They encode the agent workflow, editorial rules, red lines, and hard-won API facts (the「已验证的 API 事实」sections). When changing script behavior or flags, update the corresponding SKILL.md section and the README (config table +「已踩过的坑」list) — those are the contract agents rely on. A shared anti-AI-flavor formatting spec (punctuation quotas, layout limits, banned words, pre-publish mechanical checklist) lives at `skills/x-post-scheduler/references/writing-format.md` and applies to all human-readable output from all three skills.
 
 Script layering (`skills/x-post-scheduler/scripts/`):
 

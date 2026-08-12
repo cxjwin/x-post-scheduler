@@ -150,6 +150,7 @@ https://example.com/some-article 深度读一下   ← deep-read skill：总结+
 skills/
 ├── x-post-scheduler/        # 资讯短推 + 长文 Article
 │   ├── SKILL.md             # 流程、风格规范、红线、全部实测经验
+│   ├── references/writing-format.md  # 反 AI 味写作格式规范（标点/排版配额/禁用词，三个 skill 共用）
 │   ├── scripts/
 │   │   ├── config.mjs       # 配置加载（config.json + 环境变量 + 自动发现）
 │   │   ├── buffer-post.mjs  # Buffer 发布（零依赖，直连 MCP 端点；线程支持编号「1/ 」或 --- 拆分、逐条 [img] 配图，--dry-run 看 payload）

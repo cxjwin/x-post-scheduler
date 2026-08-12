@@ -91,4 +91,4 @@ node .claude/skills/x-post-scheduler/scripts/buffer-post.mjs \
 - **必须至少包含一个原文没有的东西**：个人经历、反例、跨领域类比或延伸推论——这是「读后感」与「洗稿」的分界线。
 - 引用作者观点必须归属清楚（「作者认为」「文中数据」），不把作者的话包装成自己的洞见；直接引语克制且加引号。
 - 反对对事不对人：可以不同意观点，不做人身攻击和动机揣测。
-- 人设、禁词（「震惊」「炸裂」等）与 x-post-scheduler 第 2 步一致。
+- 人设、禁词（「震惊」「炸裂」等）与 x-post-scheduler 第 2 步一致；标点与排版走共享格式规范 `.claude/skills/x-post-scheduler/references/writing-format.md`，定稿后按其 L1 清单扫一遍再发。
