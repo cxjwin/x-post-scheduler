@@ -18,8 +18,8 @@
 //       多行代码块转图的同时自动打包一个配套 gist（一文一 gist、单 markdown 文档、
 //       「## 代码块 N」标题与图上标题栏一致；默认 secret 未列出，--gist-public 转公开、
 //       --no-gist 关闭、--gist-url 复用已有）。
-//       gist 链接默认不进正文（--gist-links comment：保护推荐分发，与短推「链接放首评」
-//       同一逻辑）——正文只留一句纯文本提示，链接由首评承载：--auto-comment 且本次运行内
+//       gist 链接默认不进正文（--gist-links comment。依据 2026-08 更新：X 已取消链接硬降权，
+//       但 Article 吃停留时长、纯原生仍占分发优势）——正文只留一句纯文本提示，链接由首评承载：--auto-comment 且本次运行内
 //       确认发布时，自动建好带 reply_to_url 的首评回复草稿并打印一键发布入口（X 政策禁止
 //       经 API 发布/排期回复，最后一下须人点）；否则打印首评文本供手动补；
 //       --gist-links body 改为每张代码图下挂「复制 代码块 N」标题锚点深链 + 文末总链接
@@ -336,7 +336,8 @@ if (!a.noTransform) {
 
   // 代码可复制通道：全部多行代码块打包成一个 gist——单 markdown 文档，「## 代码块 N」
   // 标题与正文代码图的标题栏一字不差（buildGistDoc，设计与认证见 gist.mjs 头注释）。
-  // 链接默认不进正文（comment 模式，保护推荐分发，与短推「原文链接放首评」同一逻辑）：
+  // 链接默认不进正文（comment 模式。X 已取消链接硬降权（2026-07 官方确认），但 Article
+  // 吃停留时长，中途跳出稀释互动信号，纯原生长文仍占分发优势——详见 SKILL.md）：
   // 正文只留一句纯文本提示，gist 链接由发布后手动补的首评承载——X Article 没有 API
   // 首评通道（Typefully 的 x_article 是 standalone 平台、不能与普通推文组合，Buffer
   // 也不能回复外部帖），脚本结尾会打印首评文本。--gist-links body 时改为图下按标题

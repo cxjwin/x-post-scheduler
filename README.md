@@ -135,7 +135,7 @@ https://example.com/some-article 深度读一下   ← deep-read skill：总结+
 
 - **GitHub raw 返回 429 不用等**——那是对你本机 curl 的限流，Buffer 服务器从自己的 IP 取图不受影响，push 成功就直接发。
 - **海报要点符号用「•」别用「▸」**——中文字体缺 ▸ 字形，会渲染成豆腐块。
-- **X Article 的 Markdown 子集很小，正文图还必须走 Typefully 媒体**——代码块降级成引用、表格不渲染、行内反引号原样显示，而且**外链 markdown 图 `![](url)` 不会内嵌、只显示成链接文本**（实测踩过）。`md-assets.mjs` + `typefully-post.mjs` 自动分流：多行代码/大表格→图片并**上传 Typefully、用 `<typ:media>` 标签嵌入**（不走 github 图床）；**每张代码图带「代码块 N」标题栏**（shiki 全彩高亮，中文注释同样有色），全文代码汇总成一个 secret Gist（单 markdown 文档，同款「## 代码块 N」标题，每块自带复制按钮）；gist 链接默认**不进正文**、走发布后手动首评（保护推荐分发，`--gist-links body` 可改成图下标题锚点深链）；小表格→列表、行内码→「」、H3+→加粗行。Gist 认证不可用时只跳过复制通道，不阻塞 Article。
+- **X Article 的 Markdown 子集很小，正文图还必须走 Typefully 媒体**——代码块降级成引用、表格不渲染、行内反引号原样显示，而且**外链 markdown 图 `![](url)` 不会内嵌、只显示成链接文本**（实测踩过）。`md-assets.mjs` + `typefully-post.mjs` 自动分流：多行代码/大表格→图片并**上传 Typefully、用 `<typ:media>` 标签嵌入**（不走 github 图床）；**每张代码图带「代码块 N」标题栏**（shiki 全彩高亮，中文注释同样有色），全文代码汇总成一个 secret Gist（单 markdown 文档，同款「## 代码块 N」标题，每块自带复制按钮）；gist 链接默认**不进正文**、走发布后手动首评（X 已取消链接硬降权（2026-07 官方确认），但长文吃停留时长、纯原生仍有分发优势；代码密集文可用 `--gist-links body` 改图下标题锚点深链，发布即闭环）；小表格→列表、行内码→「」、H3+→加粗行。Gist 认证不可用时只跳过复制通道，不阻塞 Article。
 - **Typefully 的 Article 标题取自正文首个 H1**，`title` 字段不存在（传了报 422）；frontmatter 会被自动剥掉。
 - **`dueAt` 必须是未来时间**——确认拖过了预定时间就近立即发，agent 会在报告里说明。
 - **Buffer 线程读写字段不对称**——写入走 `metadata.twitter.thread`，读回来在 `metadata.thread`（`metadata.twitter.thread` 永远是空），发布后核对线程别查错字段。
