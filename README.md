@@ -139,6 +139,7 @@ https://example.com/some-article 深度读一下   ← deep-read skill：总结+
 - **Typefully 的 Article 标题取自正文首个 H1**，`title` 字段不存在（传了报 422）；frontmatter 会被自动剥掉。
 - **`dueAt` 必须是未来时间**——确认拖过了预定时间就近立即发，agent 会在报告里说明。
 - **Buffer 线程读写字段不对称**——写入走 `metadata.twitter.thread`，读回来在 `metadata.thread`（`metadata.twitter.thread` 永远是空），发布后核对线程别查错字段。
+- **回复（评论）不能经 API 发布**——X 政策禁止通过 API 发布/排期回复（Typefully 实测 403），只允许**创建回复草稿**（`--reply-to-url`）。所以 Article 的 gist 首评自动化到「草稿建好 + 一键发布入口」为止，最后一下必须人点。
 - **Typefully `media/upload` 的 `file_name` 必须是 ASCII**——中文文件名会 422（校验 `^[a-zA-Z0-9_.()\-]+\.ext$`），脚本已用 `code-1.png` 这类 ASCII 名上传，与本地中文 slug 解耦。
 - **`--publish-at now` 别直传给 Typefully**——它不认 "now" 字符串（会被静默当草稿存下、不发布），脚本已改成转近未来 ISO；且发布后要回读 `GET drafts/{id}` 确认真实状态（创建响应的 `status` 是瞬时值，可能显示 draft 但其实已 published）。
 - **Typefully 短推配图挂在 `posts[].media_ids`，不在草稿顶层**——顶层没有 `media` 字段（schema 是 `additionalProperties: false`，多传会 422）；`x_article` 是 standalone 平台，**不能与 `x` 平台混在同一草稿**（脚本已把长文/短推做成互斥模式）；Typefully 媒体上传没有 alt 文本字段，配图需要无障碍描述时用 Buffer 通道的 `--alt`。

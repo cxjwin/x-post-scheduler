@@ -19,14 +19,19 @@
 //       「## 代码块 N」标题与图上标题栏一致；默认 secret 未列出，--gist-public 转公开、
 //       --no-gist 关闭、--gist-url 复用已有）。
 //       gist 链接默认不进正文（--gist-links comment：保护推荐分发，与短推「链接放首评」
-//       同一逻辑）——正文只留一句纯文本提示，链接由发布后手动补的首评承载（脚本结尾打印）；
+//       同一逻辑）——正文只留一句纯文本提示，链接由首评承载：--auto-comment 且本次运行内
+//       确认发布时，自动建好带 reply_to_url 的首评回复草稿并打印一键发布入口（X 政策禁止
+//       经 API 发布/排期回复，最后一下须人点）；否则打印首评文本供手动补；
 //       --gist-links body 改为每张代码图下挂「复制 代码块 N」标题锚点深链 + 文末总链接
 //       （正文会带外链，分发影响自行权衡）。
 //       长文加 --dry-run：只做本地转换并打印最终 payload——不创建 gist、不上传媒体、不建草稿。
 //   node typefully-post.mjs --text-file tweet.txt \
 //       [--image /path/img.png（可重复，均挂首条，X 单推上限 4 张）] \
-//       [--first-comment "原文：https://..."] [--publish-at 同上] [--draft-title ...] [--social-set <id>]
+//       [--first-comment "原文：https://..."] [--reply-to-url "https://x.com/.../status/..."] \
+//       [--publish-at 同上] [--draft-title ...] [--social-set <id>]
 //       发单条短推。配图为本地文件路径，直传 Typefully，不经 GitHub 图床。
+//       --reply-to-url：整串作为对指定 X 帖子的回复（给已发内容补首评用）。注意只能建
+//       草稿（禁配 --publish-at）：X 政策禁止经 API 发布/排期回复，建好后 Typefully 一键发。
 //   node typefully-post.mjs --thread-file thread.txt [同上可选参数]
 //       发推串：文件内各条推文之间用「单独一行 ---」分隔（与 buffer-post.mjs 同格式），
 //       --first-comment 追加为最后一条。与 --text-file 互斥。
@@ -64,6 +69,8 @@ function parseArgs(argv) {
     else if (k === '--thread-file') a.threadFile = argv[++i];
     else if (k === '--image') (a.images ??= []).push(argv[++i]);
     else if (k === '--first-comment') a.firstComment = argv[++i];
+    else if (k === '--reply-to-url') a.replyToUrl = argv[++i];
+    else if (k === '--auto-comment') a.autoComment = true;
     else if (k === '--dry-run') a.dryRun = true;
     else if (k === '--publish-at') a.publishAt = argv[++i];
     else if (k === '--cover') a.cover = argv[++i];
@@ -78,7 +85,7 @@ function parseArgs(argv) {
   return a;
 }
 
-async function api(method, path, token, body, rawBody) {
+async function api(method, path, token, body, rawBody, { soft = false } = {}) {
   const res = await fetch(`${BASE}${path}`, {
     method,
     headers: {
@@ -92,6 +99,7 @@ async function api(method, path, token, body, rawBody) {
   try { data = JSON.parse(text); } catch { data = { raw: text }; }
   if (!res.ok || data?.error) {
     console.error(`Typefully API 错误（HTTP ${res.status}）：`, JSON.stringify(data?.error || data).slice(0, 500));
+    if (soft) return null; // soft：附属操作（如首评草稿）失败不拖垮主流程
     process.exit(1);
   }
   return data;
@@ -168,21 +176,30 @@ async function createDraftAndReport(token, socialSet, payload, rawPublishAt, { t
   if (draft.draft_title || titleFallback) console.log(`标题：${draft.draft_title || titleFallback}`);
   if (draft.private_url) console.log(`预览链接：${draft.private_url}`);
 
+  const result = { draftId, status: draft.status, publishedUrl: null };
+
   // 发布后回读真实状态：创建响应里的 status 是瞬时值（publish_at 生效后其实可能已 published，
   // 但响应仍显示 draft），有 publish_at 时轮询 GET 确认最终状态并取发布链接。
-  if (!publishAt) return;
+  // published 但链接暂空时继续轮询（发布是异步的，X 链接可能晚几秒才落库）。
+  if (!publishAt) return result;
   for (let i = 0; i < 30; i++) {
     const d = await api('GET', `/v2/social-sets/${socialSet}/drafts/${draftId}`, token);
     if (d.status === 'published') {
-      console.log(`已发布：${d.x_article_published_url || d.x_published_url || '(X 链接稍后生成)'}`);
-      break;
-    }
-    if (d.status === 'scheduled' && !wantNow) {
+      result.status = 'published';
+      result.publishedUrl = d.x_article_published_url || d.x_published_url || null;
+      if (result.publishedUrl) {
+        console.log(`已发布：${result.publishedUrl}`);
+        break;
+      }
+    } else if (d.status === 'scheduled' && !wantNow) {
+      result.status = 'scheduled';
       console.log(`已排期：${d.scheduled_date}（到点自动发布）`);
       break;
     }
     await new Promise((r) => setTimeout(r, 3000));
   }
+  if (result.status === 'published' && !result.publishedUrl) console.log('已发布：(X 链接稍后生成)');
+  return result;
 }
 
 const a = parseArgs(process.argv.slice(2));
@@ -198,12 +215,12 @@ if (a.mdFile && tweetMode) {
   console.error('错误：--markdown-file（长文）与 --text-file/--thread-file（短推）只能二选一。');
   process.exit(1);
 }
-if (tweetMode && (a.cover || a.noTransform || a.noGist || a.gistUrl || a.gistPublic || a.gistLinks)) {
-  console.error('错误：--cover/--no-transform/--no-gist/--gist-public/--gist-url/--gist-links 仅用于长文模式；短推配图请用 --image <本地图片路径>。');
+if (tweetMode && (a.cover || a.noTransform || a.noGist || a.gistUrl || a.gistPublic || a.gistLinks || a.autoComment)) {
+  console.error('错误：--cover/--no-transform/--no-gist/--gist-public/--gist-url/--gist-links/--auto-comment 仅用于长文模式；短推配图请用 --image <本地图片路径>。');
   process.exit(1);
 }
-if (!tweetMode && (a.images || a.firstComment)) {
-  console.error('错误：--image/--first-comment 仅用于短推模式（--text-file/--thread-file）。');
+if (!tweetMode && (a.images || a.firstComment || a.replyToUrl)) {
+  console.error('错误：--image/--first-comment/--reply-to-url 仅用于短推模式（--text-file/--thread-file）。');
   process.exit(1);
 }
 
@@ -271,9 +288,22 @@ if (tweetMode) {
   const posts = segments.map((t, i) => (i === 0 && mediaIds.length ? { text: t, media_ids: mediaIds } : { text: t }));
   if (a.firstComment) posts.push({ text: a.firstComment });
 
+  // --reply-to-url：整串作为对指定 X 帖子的回复（settings.reply_to_url，首条即成为
+  // 该帖的评论）。注意 X 政策：回复只能建草稿，不能经 API 发布/排期（实测 403，
+  // 2026-08-12），所以带 --reply-to-url 时禁止 --publish-at，建好后到 Typefully 一键发布。
+  if (a.replyToUrl && a.publishAt) {
+    console.error('错误：X 政策禁止通过 API 发布/排期「回复」（实测 403 FORBIDDEN）。--reply-to-url 只能创建草稿：去掉 --publish-at，建好后到 Typefully 点一下发布。');
+    process.exit(1);
+  }
   const payload = {
     ...(a.draftTitle ? { draft_title: a.draftTitle } : {}),
-    platforms: { x: { enabled: true, posts } },
+    platforms: {
+      x: {
+        enabled: true,
+        posts,
+        ...(a.replyToUrl ? { settings: { reply_to_url: a.replyToUrl } } : {}),
+      },
+    },
   };
   await createDraftAndReport(token, socialSet, payload, a.publishAt);
   process.exit(0);
@@ -399,10 +429,42 @@ if (a.dryRun) {
   process.exit(0);
 }
 
-await createDraftAndReport(token, socialSet, payload, a.publishAt, { titleFallback: '(取自 H1)' });
+const res = await createDraftAndReport(token, socialSet, payload, a.publishAt, { titleFallback: '(取自 H1)' });
 
-// X Article 无 API 首评通道（见上），评论区的 gist 链接需发布后手动补一条
-if (gist) {
+// 自动首评（--auto-comment）：X Article 没有原生首评 API，但发布后它就是一条普通
+// status——给它建一条带 settings.reply_to_url 的回复草稿即是首评。注意 X 政策边界
+// （实测 403，2026-08-12）：回复**只能建草稿**，经 API 发布/排期回复被禁止——所以这里
+// 只自动建好草稿并打印一键发布入口，最后一下必须人在 Typefully 里点。
+// 仅在本次运行内确认「已发布且拿到链接」时触发；排期发布时脚本不在场，走下方手动兜底。
+let commentHandled = false;
+if (a.autoComment && gist) {
+  if (res.status === 'published' && res.publishedUrl) {
+    const commentPayload = {
+      draft_title: `首评：${(h1 ? h1[1].trim() : basename(a.mdFile, '.md')).slice(0, 60)}`,
+      platforms: {
+        x: {
+          enabled: true,
+          posts: [{ text: `本文代码可复制版 → ${gist.url}` }],
+          settings: { reply_to_url: res.publishedUrl },
+        },
+      },
+    };
+    const cd = await api('POST', `/v2/social-sets/${socialSet}/drafts`, token, commentPayload, undefined, { soft: true });
+    if (cd) {
+      commentHandled = true;
+      console.log(`首评回复草稿已建：draft_id=${cd.draft_id || cd.id}（X 政策禁止 API 直接发布回复，差最后一下）`);
+      console.log(`一键发布入口：${cd.private_url}`);
+    } else {
+      console.error('警告：首评回复草稿创建失败，退回手动补评（文本见下）。');
+    }
+  } else {
+    console.error(`--auto-comment 未执行：文章状态为 ${res.status}${res.publishedUrl ? '' : '（未拿到文章链接）'}。文章发出后可手动建回复草稿：`);
+    console.error('  node typefully-post.mjs --text-file <首评文本> --reply-to-url <文章链接>   # 不带 --publish-at，建好后到 Typefully 点发布');
+  }
+}
+
+// 首评未被安排时，打印首评文本供手动补（comment 模式下这是读者唯一的复制入口）
+if (gist && !commentHandled) {
   console.log(gistLinks === 'comment'
     ? '首评（正文未带任何外链，这条是读者唯一的复制入口——发布后务必手动贴到评论区，先记入 pending-replies.md）：'
     : '建议首评（正文已带深链，这条是补充曝光，可选）：');

@@ -228,7 +228,8 @@ node .claude/skills/x-post-scheduler/scripts/typefully-post.mjs \
   [--cover 封面.png] \
   [--no-gist | --gist-public | --gist-url "已有 Gist URL"] \
   [--gist-links comment|body] \
-  [--publish-at "2026-07-16T08:00:00+08:00" | --publish-at now]   # 不带此参数=仅存草稿；now=立即发布
+  [--publish-at "2026-07-16T08:00:00+08:00" | --publish-at now] \
+  [--auto-comment]   # 配合 --publish-at now：发布确认后自动建好 gist 首评回复草稿（一键发布入口见输出）
 # --gist-links 默认 comment：正文零外链，gist 链接走发布后手动首评（脚本结尾打印首评文本）；
 # body 则每张代码图下挂「复制 代码块 N」标题锚点深链 + 文末总链接（正文带外链，分发影响自行权衡）。
 # 长文 --dry-run：只做本地转换并打印最终 payload（不建 gist、不上传媒体、不建草稿），检查转换结果用。
@@ -242,7 +243,7 @@ node .claude/skills/x-post-scheduler/scripts/typefully-post.mjs \
 - token 从环境变量 `TYPEFULLY_KEY` 或 `~/.config/typefully/key` 读取；social set 未配置时自动发现（恰好一个时）
 - **代码可复制性（配套 gist，脚本自动执行）**：代码块转图后读者无法复制，脚本把全部多行代码块汇总成**一篇 Article 一个 secret Gist**——gist 内是单个 markdown 文档，「## 代码块 N」中文标题与正文代码图的标题栏一字不差，GitHub 渲染后每块自带复制按钮，读者按标题对照复制。默认 **secret**（未列出：仅持链接可见、不进个人列表、不被索引——草稿阶段就会创建，未发布/放弃时不至于把代码公开广播），`--gist-public` 改公开、`--no-gist` 关闭、`--gist-url` 复用已有。认证按已登录 `gh` CLI → `GH_TOKEN`/`GITHUB_TOKEN`（`node gist.mjs --check` 自检），不可用时只警告并继续发文。**放弃草稿时记得 `gh gist delete <id>` 同步清理**（脚本结尾会打印这条命令）
 - **gist 链接默认不进正文（`--gist-links comment`，保护推荐分发）**：与短推「原文链接放首评、不占正文」同一逻辑——正文外链有降权风险，也是阅读中途的流失出口。默认正文只在文末留一句**纯文本**提示「全部代码块的可复制版本见评论区」（无任何链接），gist 链接由发布后手动补的首评承载。用户明确接受正文带外链时用 `--gist-links body`：每张代码图下挂「复制 代码块 N」深链（`#代码块-N` percent-encoded 标题锚点直达对应小节）+ 文末总链接
-- **首评补 gist 链接（comment 模式下必做）**：X Article 没有 API 首评通道——Typefully 的 `x_article` 是 standalone 平台、不能与普通推文组合，Buffer 也不能回复外部帖。脚本结尾会打印首评文本「本文代码可复制版 → <gist url>」：把它按 `pending-replies.md` 格式记下，文章发出后提醒用户手动贴到评论区。**comment 模式（默认）下这条首评是读者唯一的复制入口，漏发 = 复制通道断掉**，发布后报告里必须显式提醒；body 模式下它只是补充曝光，可选
+- **首评补 gist 链接（comment 模式下必做）**：X Article 发布后是一条普通 status，可用短推的 `settings.reply_to_url` 给它建**回复草稿**当首评——但 **X 政策禁止经 API 发布/排期回复（实测 403 FORBIDDEN，2026-08-12），只允许创建草稿**，最后一下必须人在 Typefully 里点。推荐流程：`--publish-at now --auto-comment` 让脚本在确认发布后自动建好首评回复草稿并打印一键发布入口；排期发布（脚本不在场）或草稿创建失败时，脚本打印首评文本「本文代码可复制版 → <gist url>」，按 `pending-replies.md` 格式记下，发出后手动补（或用 `--text-file` + `--reply-to-url` 手动建回复草稿）。**comment 模式（默认）下这条首评是读者唯一的复制入口，漏发 = 复制通道断掉**，发布后报告里必须显式提醒；body 模式下它只是补充曝光，可选
 - 已验证的 API 事实：`x_article.content_markdown` 为正文字段，**文章标题取自正文首个 H1**（`x_article` 下没有 `title` 字段，传了报 422 extra_forbidden）；封面走 `--cover`（顶层 `cover_media_id`）；frontmatter 会被脚本自动剥掉。改错草稿用 `DELETE /v2/social-sets/{ss}/drafts/{id}`（实测返回 204；已发布的 Article 删 Typefully 记录**不撤回** X 上的原生文章，需在 X 手动删）
 - 发布 Article 需要账号有 X Premium
 
@@ -281,13 +282,17 @@ node .claude/skills/x-post-scheduler/scripts/typefully-post.mjs \
   [--publish-at "2026-07-16T08:00:00+08:00" | --publish-at now | --publish-at next-free-slot]
 # 推串：与 buffer-post.mjs 同格式（各条之间用单独一行 --- 分隔），--first-comment 追加为最后一条
 node .claude/skills/x-post-scheduler/scripts/typefully-post.mjs --thread-file /tmp/thread.txt [同上可选参数]
+# 回复某条已发帖子（如给已发 Article 补首评）：--reply-to-url 只能建草稿、禁配 --publish-at
+#（X 政策禁止经 API 发布/排期回复，实测 403），建好后到 Typefully 一键发布
+node .claude/skills/x-post-scheduler/scripts/typefully-post.mjs --text-file /tmp/reply.txt \
+  --reply-to-url "https://x.com/<user>/status/<id>"
 # 发前自检：--dry-run 打印分条与每条加权字数（口径同 buffer-post.mjs），不联网、不建草稿
 node .claude/skills/x-post-scheduler/scripts/typefully-post.mjs --thread-file /tmp/thread.txt --dry-run
 ```
 
 - **第 4 步发布决策与红线回退同样适用本通道**：换通道不改确认规则，自动发布授权对两条短推通道一体生效
 - 不带 `--publish-at` 仅存草稿（打印 `private_url` 预览链接）；`now` 的处理与 Article 相同（脚本转近未来 ISO 再排期）
-- 已验证的 API 事实（实测）：短推走 `platforms.x`，`enabled: true` 必填、`posts[]` 每项一条推文（上限 50 条）；**配图挂在 `posts[].media_ids`**（每条上限 10，X 实际单推上限 4 张图），媒体上传与 Article 共用一条通道（ASCII 文件名约束同样适用）；`x_article` 平台是 standalone、**不能与 `x` 平台混在同一草稿**（脚本因此把 `--markdown-file` 与 `--text-file/--thread-file` 设计为互斥）；Typefully 媒体上传**没有 alt 文本字段**（配图需要无障碍描述时用 Buffer 通道的 `--alt`）；短推发布后的链接字段是 `x_published_url`（脚本轮询时已打印）
+- 已验证的 API 事实（实测）：短推走 `platforms.x`，`enabled: true` 必填、`posts[]` 每项一条推文（上限 50 条）；**配图挂在 `posts[].media_ids`**（每条上限 10，X 实际单推上限 4 张图），媒体上传与 Article 共用一条通道（ASCII 文件名约束同样适用）；`x_article` 平台是 standalone、**不能与 `x` 平台混在同一草稿**（脚本因此把 `--markdown-file` 与 `--text-file/--thread-file` 设计为互斥）；Typefully 媒体上传**没有 alt 文本字段**（配图需要无障碍描述时用 Buffer 通道的 `--alt`）；短推发布后的链接字段是 `x_published_url`（脚本轮询时已打印）；`settings.reply_to_url` 可把整串挂为任意 X 帖子的回复，但**回复只能建草稿——经 API 发布/排期回复被 X 政策禁止**（实测 403 FORBIDDEN：`publishing or scheduling replies via the API is blocked`）
 
 ## 附：已验证的 Buffer API 事实（实测，供排错参考）
 
